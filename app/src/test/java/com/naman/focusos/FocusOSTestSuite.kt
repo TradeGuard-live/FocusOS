@@ -3,7 +3,10 @@ package com.naman.focusos
 import com.naman.focusos.data.model.HabitCompletionEntity
 import com.naman.focusos.data.preferences.UserSettings
 import com.naman.focusos.ui.theme.DarkFocusColors
+import com.naman.focusos.ui.theme.LavenderFocusColors
 import com.naman.focusos.ui.theme.LightFocusColors
+import com.naman.focusos.ui.theme.MidnightMochiFocusColors
+import com.naman.focusos.ui.theme.PeachyFocusColors
 import androidx.compose.ui.graphics.Color
 import com.naman.focusos.data.model.HabitEntity
 import com.naman.focusos.data.model.HabitFrequency
@@ -994,22 +997,22 @@ class FocusOSTestSuite {
     fun testLightAndDarkThemePalettes() {
         // Verify Light theme palette matches specifications exactly
         assertFalse(LightFocusColors.isDark)
-        assertEquals(Color(0xFFF5F7FB), LightFocusColors.background)
+        assertEquals(Color(0xFFF6F8FC), LightFocusColors.background)
         assertEquals(Color(0xFFFFFFFF), LightFocusColors.surface)
         assertEquals(Color(0xFF172033), LightFocusColors.textPrimary)
-        assertEquals(Color(0xFF697586), LightFocusColors.textSecondary)
-        assertEquals(Color(0xFF19B9EF), LightFocusColors.primaryAccent)
-        assertEquals(Color(0xFFE2E8F0), LightFocusColors.border)
-        assertEquals(Color(0xFFEDF2F7), LightFocusColors.surfaceVariant)
-        assertEquals(Color(0xFF10B981), LightFocusColors.success)
-        assertEquals(Color(0xFFF59E0B), LightFocusColors.warning)
-        assertEquals(Color(0xFFEF4444), LightFocusColors.danger)
+        assertEquals(Color(0xFF64748B), LightFocusColors.textSecondary)
+        assertEquals(Color(0xFF2563EB), LightFocusColors.primaryAccent)
+        assertEquals(Color(0xFFE5EAF2), LightFocusColors.border)
+        assertEquals(Color(0xFFF1F5F9), LightFocusColors.surfaceVariant)
+        assertEquals(Color(0xFF059669), LightFocusColors.success)
+        assertEquals(Color(0xFFD97706), LightFocusColors.warning)
+        assertEquals(Color(0xFFDC2626), LightFocusColors.danger)
 
-        // Verify Dark theme palette maintains existing dark visual styling
+        // Verify RupeeFlow Dark theme palette maintains dark visual styling
         assertTrue(DarkFocusColors.isDark)
-        assertEquals(Color(0xFF0B0F19), DarkFocusColors.background)
-        assertEquals(Color(0xFF141C2E), DarkFocusColors.surface)
-        assertEquals(Color(0xFF19B9EF), DarkFocusColors.primaryAccent)
+        assertEquals(Color(0xFF0A0E17), DarkFocusColors.background)
+        assertEquals(Color(0xFF111827), DarkFocusColors.surface)
+        assertEquals(Color(0xFF3B82F6), DarkFocusColors.primaryAccent)
     }
 
     @Test
@@ -1324,5 +1327,112 @@ class FocusOSTestSuite {
         // Non-occurrence dates are disabled
         assertFalse(HabitSyncEngine.isHabitScheduledOnDate(habit, LocalDate.parse("2026-11-11"), scheduledDates = scheduledDates))
         assertFalse(HabitSyncEngine.isHabitScheduledOnDate(habit, LocalDate.parse("2026-11-24"), scheduledDates = scheduledDates))
+    }
+
+    // ==========================================
+    // 8. RupeeFlow 4-Theme System Verification Tests
+    // ==========================================
+
+    @Test
+    fun testPeachyCozyThemeTokens() {
+        val colors = PeachyFocusColors
+        assertNotNull(colors)
+        assertFalse("Peachy Cozy must be a light theme", colors.isDark)
+
+        // Palette checks
+        assertEquals(Color(0xFFFFF8F1), colors.background)
+        assertEquals(Color(0xFFFFFFFF), colors.surface)
+        assertEquals(Color(0xFFFFF0E6), colors.surfaceSecondary)
+        assertEquals(Color(0xFF4A3028), colors.textPrimary)
+        assertEquals(Color(0xFF92766B), colors.textSecondary)
+        assertEquals(Color(0xFFF0DDD2), colors.border)
+        assertEquals(Color(0xFFF58B72), colors.primaryAccent)
+        assertEquals(Color(0xFF268B65), colors.success)
+        assertEquals(Color(0xFFD95757), colors.error)
+        assertEquals(Color(0xFFFFD98E), colors.warning)
+
+        // RupeeFlow semantic tokens
+        assertEquals(Color(0xFFFFAD91), colors.primaryPeach)
+        assertEquals(Color(0xFFF58B72), colors.deepPeach)
+        assertEquals(Color(0xFFB9E5D2), colors.mint)
+    }
+
+    @Test
+    fun testLavenderDreamThemeTokens() {
+        val colors = LavenderFocusColors
+        assertNotNull(colors)
+        assertFalse("Lavender Dream must be a light theme", colors.isDark)
+
+        // Palette checks
+        assertEquals(Color(0xFFF7F3FC), colors.background)
+        assertEquals(Color(0xFFFFFFFF), colors.surface)
+        assertEquals(Color(0xFFEEE7F7), colors.surfaceSecondary)
+        assertEquals(Color(0xFF342A45), colors.textPrimary)
+        assertEquals(Color(0xFF80748F), colors.textSecondary)
+        assertEquals(Color(0xFFE2D8EF), colors.border)
+        assertEquals(Color(0xFF9274C8), colors.primaryAccent)
+        assertEquals(Color(0xFF269B78), colors.success)
+        assertEquals(Color(0xFFD95770), colors.error)
+        assertEquals(Color(0xFFD99B49), colors.warning)
+        assertEquals(Color(0xFFB9A4E8), colors.info)
+        assertEquals(Color(0xFFE6BCEB), colors.accentPink)
+    }
+
+    @Test
+    fun testMidnightMochiThemeTokens() {
+        val colors = MidnightMochiFocusColors
+        assertNotNull(colors)
+        assertTrue("Midnight Mochi must be a dark theme", colors.isDark)
+
+        // Palette checks
+        assertEquals(Color(0xFF100E19), colors.background)
+        assertEquals(Color(0xFF191626), colors.surface)
+        assertEquals(Color(0xFF252036), colors.surfaceSecondary)
+        assertEquals(Color(0xFF211D31), colors.surfaceElevated)
+        assertEquals(Color(0xFFF5F0FC), colors.textPrimary)
+        assertEquals(Color(0xFFB6ADC9), colors.textSecondary)
+        assertEquals(Color(0xFF393149), colors.border)
+        assertEquals(Color(0xFFB49AEF), colors.primaryAccent)
+        assertEquals(Color(0xFF55C99B), colors.success)
+        assertEquals(Color(0xFFF07891), colors.error)
+        assertEquals(Color(0xFFE7B66C), colors.warning)
+        assertEquals(Color(0xFFD0BDF8), colors.info)
+        assertEquals(Color(0xFFF0A9D5), colors.accentPink)
+    }
+
+    @Test
+    fun testMidnightDarkThemeTokens() {
+        val colors = DarkFocusColors
+        assertNotNull(colors)
+        assertTrue("Midnight Dark must be a dark theme", colors.isDark)
+
+        // Palette checks
+        assertEquals(Color(0xFF0A0E17), colors.background)
+        assertEquals(Color(0xFF111827), colors.surface)
+        assertEquals(Color(0xFF1E293B), colors.surfaceSecondary)
+        assertEquals(Color(0xFFF8FAFC), colors.textPrimary)
+        assertEquals(Color(0xFF94A3B8), colors.textSecondary)
+        assertEquals(Color(0x3394A3B8), colors.border)
+        assertEquals(Color(0xFF3B82F6), colors.primaryAccent)
+        assertEquals(Color(0xFF10B981), colors.success)
+        assertEquals(Color(0xFFEF4444), colors.error)
+        assertEquals(Color(0xFFF59E0B), colors.warning)
+    }
+
+    @Test
+    fun testAllThemesContrastReadability() {
+        val allThemes = listOf(PeachyFocusColors, LavenderFocusColors, MidnightMochiFocusColors, DarkFocusColors)
+        for (theme in allThemes) {
+            // Text primary must not equal background
+            assertFalse(theme.textPrimary == theme.background)
+            // Surface must be defined
+            assertNotNull(theme.surface)
+            // Accent must be distinct from background
+            assertFalse(theme.primaryAccent == theme.background)
+            // Success, Error, Warning must be defined
+            assertNotNull(theme.success)
+            assertNotNull(theme.error)
+            assertNotNull(theme.warning)
+        }
     }
 }

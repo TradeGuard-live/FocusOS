@@ -52,7 +52,9 @@ import androidx.compose.ui.unit.sp
 import com.naman.focusos.data.model.CategoryEntity
 import com.naman.focusos.data.model.TaskEntity
 import com.naman.focusos.data.model.TimetableEntryEntity
+import com.naman.focusos.ui.components.FocusBunnyMascot
 import com.naman.focusos.ui.components.FocusCard
+import com.naman.focusos.ui.components.MascotPose
 import com.naman.focusos.ui.components.ProgressRing
 import com.naman.focusos.ui.components.QuickAddTaskSheet
 import com.naman.focusos.ui.components.TaskCard
@@ -433,18 +435,20 @@ fun EmptyDayTasksCard(onAddTask: () -> Unit) {
                 .fillMaxWidth()
                 .padding(24.dp)
         ) {
-            Text(
-                text = "✨",
-                fontSize = 32.sp
+            FocusBunnyMascot(
+                pose = MascotPose.HAPPY,
+                size = 100.dp
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "No tasks for today",
+                text = "All clear for today!",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = FocusTheme.colors.textPrimary)
             )
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Tap to schedule a focus task, routine or deadline.",
-                style = MaterialTheme.typography.bodyMedium.copy(color = FocusTheme.colors.textSecondary, fontSize = 12.sp)
+                text = "No tasks for today. Tap below to schedule a focus task, routine or deadline.",
+                style = MaterialTheme.typography.bodyMedium.copy(color = FocusTheme.colors.textSecondary, fontSize = 12.sp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
         }
     }

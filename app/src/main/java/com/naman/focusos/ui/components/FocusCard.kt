@@ -73,6 +73,8 @@ fun ProgressRing(
     val trackColor = if (FocusTheme.colors.isDark) Color(0xFF1E2840) else Color(0xFFE2E8F0)
     val textColor = FocusTheme.colors.textPrimary
     val subtextColor = FocusTheme.colors.textSecondary
+    val primaryAccent = FocusTheme.colors.primaryAccent
+    val successColor = FocusTheme.colors.success
 
     Box(
         contentAlignment = Alignment.Center,
@@ -96,7 +98,7 @@ fun ProgressRing(
 
             // Active gradient progress arc
             val gradient = Brush.sweepGradient(
-                colors = listOf(ElectricBlue, MintEmerald, ElectricBlue)
+                colors = listOf(primaryAccent, successColor, primaryAccent)
             )
             drawArc(
                 brush = gradient,

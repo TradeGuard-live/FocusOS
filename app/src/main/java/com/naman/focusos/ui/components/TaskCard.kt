@@ -75,13 +75,13 @@ fun TaskCard(
     }
 
     val checkboxBg by animateColorAsState(
-        targetValue = if (isCompleted) MintEmerald else Color.Transparent,
+        targetValue = if (isCompleted) FocusTheme.colors.success else Color.Transparent,
         animationSpec = tween(300),
         label = "task_checkbox_bg"
     )
 
     val checkboxBorder by animateColorAsState(
-        targetValue = if (isCompleted) MintEmerald else FocusTheme.colors.border,
+        targetValue = if (isCompleted) FocusTheme.colors.success else FocusTheme.colors.border,
         animationSpec = tween(300),
         label = "task_checkbox_border"
     )
@@ -364,38 +364,13 @@ fun TaskCard(
 
 @Composable
 fun StatusPill(status: TaskStatus) {
-    val isDark = FocusTheme.colors.isDark
     val (bgColor, textColor, label) = when (status) {
-        TaskStatus.COMPLETED_ON_TIME -> if (isDark) {
-            Triple(Color(0xFF064E3B), MintEmerald, "On Time")
-        } else {
-            Triple(Color(0xFFD1FAE5), Color(0xFF065F46), "On Time")
-        }
-        TaskStatus.COMPLETED_LATE -> if (isDark) {
-            Triple(Color(0xFF451A03), WarmAmber, "Late")
-        } else {
-            Triple(Color(0xFFFEF3C7), Color(0xFF92400E), "Late")
-        }
-        TaskStatus.MISSED -> if (isDark) {
-            Triple(Color(0xFF450A0A), CrimsonCoral, "Missed")
-        } else {
-            Triple(Color(0xFFFEE2E2), Color(0xFF991B1B), "Missed")
-        }
-        TaskStatus.IN_PROGRESS -> if (isDark) {
-            Triple(Color(0xFF0C4A6E), ElectricBlue, "Active")
-        } else {
-            Triple(Color(0xFFE0F2FE), Color(0xFF0369A1), "Active")
-        }
-        TaskStatus.UPCOMING -> if (isDark) {
-            Triple(Color(0xFF1E293B), Color(0xFF94A3B8), "Upcoming")
-        } else {
-            Triple(Color(0xFFEDF2F7), Color(0xFF475569), "Upcoming")
-        }
-        TaskStatus.SKIPPED -> if (isDark) {
-            Triple(Color(0xFF1E293B), Color(0xFF64748B), "Skipped")
-        } else {
-            Triple(Color(0xFFEDF2F7), Color(0xFF697586), "Skipped")
-        }
+        TaskStatus.COMPLETED_ON_TIME -> Triple(FocusTheme.colors.successContainer, FocusTheme.colors.success, "On Time")
+        TaskStatus.COMPLETED_LATE -> Triple(FocusTheme.colors.warningContainer, FocusTheme.colors.warning, "Late")
+        TaskStatus.MISSED -> Triple(FocusTheme.colors.errorContainer, FocusTheme.colors.error, "Missed")
+        TaskStatus.IN_PROGRESS -> Triple(FocusTheme.colors.primaryAccentContainer, FocusTheme.colors.primaryAccent, "Active")
+        TaskStatus.UPCOMING -> Triple(FocusTheme.colors.surfaceSecondary, FocusTheme.colors.textSecondary, "Upcoming")
+        TaskStatus.SKIPPED -> Triple(FocusTheme.colors.surfaceSecondary, FocusTheme.colors.textTertiary, "Skipped")
     }
 
     Box(

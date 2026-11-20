@@ -60,8 +60,10 @@ import com.naman.focusos.data.model.HabitFrequency
 import com.naman.focusos.domain.analytics.ProductivityIntelligenceEngine
 import com.naman.focusos.domain.scheduler.HabitSyncEngine
 import com.naman.focusos.ui.components.CreateHabitDialog
+import com.naman.focusos.ui.components.FocusBunnyMascot
 import com.naman.focusos.ui.components.FocusCard
 import com.naman.focusos.ui.components.HabitGrid
+import com.naman.focusos.ui.components.MascotPose
 import com.naman.focusos.ui.theme.CrimsonCoral
 import com.naman.focusos.ui.theme.FocusTheme
 import com.naman.focusos.ui.theme.MintEmerald
@@ -263,13 +265,11 @@ fun RoutinesScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier.fillMaxWidth().padding(24.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Repeat,
-                                contentDescription = null,
-                                tint = FocusTheme.colors.primaryAccent,
-                                modifier = Modifier.size(36.dp)
+                            FocusBunnyMascot(
+                                pose = MascotPose.THINKING,
+                                size = 96.dp
                             )
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
                             Text(
                                 text = "No active habits or recurring routines yet.",
                                 color = FocusTheme.colors.textPrimary,
@@ -280,6 +280,7 @@ fun RoutinesScreen(
                                 text = "Tasks with Daily or Weekly recurrence automatically appear here. Single-day tasks are excluded.",
                                 color = FocusTheme.colors.textSecondary,
                                 fontSize = 12.sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                                 modifier = Modifier.padding(horizontal = 8.dp)
                             )
                             Spacer(modifier = Modifier.height(14.dp))
@@ -291,7 +292,9 @@ fun RoutinesScreen(
                                 ),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
-                                Text("Create Habit", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Create Habit", fontWeight = FontWeight.Bold)
                             }
                         }
                     }

@@ -75,7 +75,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            FocusOSTheme(darkTheme = isDarkTheme) {
+            FocusOSTheme(themeMode = settings.themeMode) {
                 FocusOSApp()
             }
         }

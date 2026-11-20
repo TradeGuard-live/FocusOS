@@ -43,7 +43,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.naman.focusos.data.model.TaskEntity
+import com.naman.focusos.ui.components.FocusBunnyMascot
 import com.naman.focusos.ui.components.FocusCard
+import com.naman.focusos.ui.components.MascotPose
 import com.naman.focusos.ui.components.QuickAddTaskSheet
 import com.naman.focusos.ui.components.TaskCard
 import com.naman.focusos.ui.theme.ElectricBlue
@@ -149,13 +151,29 @@ fun CalendarScreen(
             if (uiState.selectedDateTasks.isEmpty()) {
                 item {
                     FocusCard {
-                        Box(
-                            contentAlignment = Alignment.Center,
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier.fillMaxWidth().padding(24.dp)
                         ) {
+                            FocusBunnyMascot(
+                                pose = MascotPose.SLEEPING,
+                                size = 88.dp
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
                             Text(
                                 text = "No tasks scheduled on this day.",
-                                style = MaterialTheme.typography.bodyMedium.copy(color = FocusTheme.colors.textSecondary)
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = FocusTheme.colors.textPrimary
+                                )
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Take a break, or tap + to schedule a focus task or routine.",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    color = FocusTheme.colors.textSecondary,
+                                    fontSize = 12.sp
+                                )
                             )
                         }
                     }
