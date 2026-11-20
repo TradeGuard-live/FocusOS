@@ -1,0 +1,73 @@
+# Built & Compiled Artifacts
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# Package Files & Archives
+*.jar
+*.war
+*.ear
+# Do not ignore Gradle wrapper JAR
+!gradle/wrapper/gradle-wrapper.jar
+
+# Build directories & caches
+build/
+**/build/
+.gradle/
+.kotlin/
+bin/
+gen/
+out/
+
+# Android Studio & IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+.navigation/
+captures/
+.externalNativeBuild/
+.cxx/
+cmakeBuild/
+
+# Local configuration & environment secrets
+local.properties
+.env
+*.local
+
+# Signing keys & Keystores (Security)
+*.jks
+*.keystore
+*.p12
+*.key
+google-services.json
+
+# SQLite / Room DB temporary files
+*.db-shm
+*.db-wal
+*.db-journal
+
+# Log & Profiler files
+*.log
+hs_err_pid*
+replay_pid*
+
+# OS-generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*~
+*.swp
+*.swo
+
+# Temporary & backup files
+*.bak
+*.tmp
+*.orig
+

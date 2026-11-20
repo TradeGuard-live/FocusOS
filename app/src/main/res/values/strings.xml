@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">FOCUS OS</string>
+    <string name="widget_name">Focus OS Dashboard</string>
+    <string name="widget_description">Interactive productivity tasks &amp; timetable</string>
+</resources>
