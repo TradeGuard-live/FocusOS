@@ -18,14 +18,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Assignment
-import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.automirrored.filled.Assignment
+import androidx.compose.material.icons.automirrored.filled.TrendingDown
+import androidx.compose.material.icons.automirrored.filled.TrendingFlat
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.PhoneAndroid
@@ -33,9 +33,6 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Timeline
-import androidx.compose.material.icons.filled.TrendingDown
-import androidx.compose.material.icons.filled.TrendingFlat
-import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -55,7 +52,6 @@ import androidx.compose.ui.unit.sp
 import com.naman.focusos.data.model.AppClassification
 import com.naman.focusos.domain.focus.AnalyticsDateFilter
 import com.naman.focusos.domain.focus.BestFocusPeriodRecommendation
-import com.naman.focusos.domain.focus.CategoryFocusAnalytics
 import com.naman.focusos.domain.focus.DistractionDashboardData
 import com.naman.focusos.domain.focus.DistractionPatternReport
 import com.naman.focusos.domain.focus.FocusScoreDetail
@@ -67,9 +63,9 @@ import com.naman.focusos.domain.focus.ProductivityInsight
 import com.naman.focusos.domain.focus.RecommendationConfidence
 import com.naman.focusos.domain.focus.ScoreCategory
 import com.naman.focusos.domain.focus.TaskEfficiencySummary
-import com.naman.focusos.domain.focus.TaskFocusComparison
 import com.naman.focusos.ui.components.FocusCard
 import com.naman.focusos.ui.theme.FocusTheme
+import java.time.DayOfWeek
 
 @Composable
 fun FocusAnalyticsView(
@@ -203,6 +199,10 @@ private fun FocusScoreCard(scoreDetail: FocusScoreDetail) {
                 }
 
                 // Trend badge
+                val trend = scoreDetail.trendPercentage
+                val isPositive = trend != null && trend > 0f
+                val isNegative = trend != null && trend < 0f
+
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -210,21 +210,21 @@ private fun FocusScoreCard(scoreDetail: FocusScoreDetail) {
                         .clip(RoundedCornerShape(8.dp))
                         .background(
                             when {
-                                scoreDetail.periodTrend > 0 -> FocusTheme.colors.success.copy(alpha = 0.12f)
-                                scoreDetail.periodTrend < 0 -> FocusTheme.colors.error.copy(alpha = 0.12f)
+                                isPositive -> FocusTheme.colors.success.copy(alpha = 0.12f)
+                                isNegative -> FocusTheme.colors.error.copy(alpha = 0.12f)
                                 else -> FocusTheme.colors.surfaceVariant
                             }
                         )
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     val icon = when {
-                        scoreDetail.periodTrend > 0 -> Icons.Default.TrendingUp
-                        scoreDetail.periodTrend < 0 -> Icons.Default.TrendingDown
-                        else -> Icons.Default.TrendingFlat
+                        isPositive -> Icons.AutoMirrored.Filled.TrendingUp
+                        isNegative -> Icons.AutoMirrored.Filled.TrendingDown
+                        else -> Icons.AutoMirrored.Filled.TrendingFlat
                     }
                     val trendColor = when {
-                        scoreDetail.periodTrend > 0 -> FocusTheme.colors.success
-                        scoreDetail.periodTrend < 0 -> FocusTheme.colors.error
+                        isPositive -> FocusTheme.colors.success
+                        isNegative -> FocusTheme.colors.error
                         else -> FocusTheme.colors.textSecondary
                     }
                     Icon(
@@ -234,7 +234,7 @@ private fun FocusScoreCard(scoreDetail: FocusScoreDetail) {
                         modifier = Modifier.size(14.dp)
                     )
                     Text(
-                        text = if (scoreDetail.periodTrend != 0) "${if (scoreDetail.periodTrend > 0) "+" else ""}${scoreDetail.periodTrend}%" else "Stable",
+                        text = if (trend != null && trend != 0f) "${if (trend > 0) "+" else ""}${trend.toInt()}%" else "Stable",
                         style = MaterialTheme.typography.labelSmall.copy(
                             color = trendColor,
                             fontWeight = FontWeight.Bold,
@@ -340,7 +340,7 @@ private fun FocusScoreCard(scoreDetail: FocusScoreDetail) {
                     }
 
                     Text(
-                        text = scoreDetail.statusMessage,
+                        text = scoreDetail.explanation,
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = FocusTheme.colors.textSecondary,
                             lineHeight = 16.sp
@@ -351,7 +351,7 @@ private fun FocusScoreCard(scoreDetail: FocusScoreDetail) {
 
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            text = "${scoreDetail.sessionCount} sessions",
+                            text = "${scoreDetail.sessionsIncludedCount} sessions",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = FocusTheme.colors.textPrimary,
                                 fontWeight = FontWeight.SemiBold,
@@ -363,7 +363,7 @@ private fun FocusScoreCard(scoreDetail: FocusScoreDetail) {
                             style = MaterialTheme.typography.labelSmall.copy(color = FocusTheme.colors.textSecondary)
                         )
                         Text(
-                            text = "${scoreDetail.dataCoveragePercent}% coverage",
+                            text = "${scoreDetail.coveragePercentage}% coverage",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = FocusTheme.colors.textPrimary,
                                 fontWeight = FontWeight.SemiBold,
@@ -392,30 +392,30 @@ private fun FocusScoreCard(scoreDetail: FocusScoreDetail) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ScoreContributorBar(
                     label = "Focus Completion (40%)",
-                    points = (scoreDetail.completionScore * 0.40f).toInt(),
+                    points = (scoreDetail.focusCompletionScore * 0.40f).toInt(),
                     maxPoints = 40,
-                    percent = scoreDetail.completionScore,
+                    percent = scoreDetail.focusCompletionScore.toInt(),
                     color = FocusTheme.colors.primaryAccent
                 )
                 ScoreContributorBar(
                     label = "Distraction Control (30%)",
                     points = (scoreDetail.distractionControlScore * 0.30f).toInt(),
                     maxPoints = 30,
-                    percent = scoreDetail.distractionControlScore,
+                    percent = scoreDetail.distractionControlScore.toInt(),
                     color = FocusTheme.colors.success
                 )
                 ScoreContributorBar(
                     label = "Consistency & Cadence (20%)",
                     points = (scoreDetail.consistencyScore * 0.20f).toInt(),
                     maxPoints = 20,
-                    percent = scoreDetail.consistencyScore,
+                    percent = scoreDetail.consistencyScore.toInt(),
                     color = FocusTheme.colors.info
                 )
                 ScoreContributorBar(
                     label = "Target Completion (10%)",
-                    points = (scoreDetail.sessionCompletionRate * 0.10f).toInt(),
+                    points = (scoreDetail.sessionCompletionScore * 0.10f).toInt(),
                     maxPoints = 10,
-                    percent = scoreDetail.sessionCompletionRate,
+                    percent = scoreDetail.sessionCompletionScore.toInt(),
                     color = FocusTheme.colors.warning
                 )
             }
@@ -572,7 +572,7 @@ private fun PeakFocusHoursCard(
                         .padding(horizontal = 8.dp, vertical = 3.dp)
                 ) {
                     Text(
-                        text = "${bestPeriod.confidence.displayName} CONFIDENCE",
+                        text = "${bestPeriod.confidence.displayName.uppercase()}",
                         style = MaterialTheme.typography.labelSmall.copy(
                             color = confidenceColor,
                             fontWeight = FontWeight.Bold,
@@ -599,14 +599,14 @@ private fun PeakFocusHoursCard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "${String.format("%02d:00", bestPeriod.startHour)} – ${String.format("%02d:00", bestPeriod.endHour)}",
+                            text = bestPeriod.bestTwoHourFormatted,
                             style = MaterialTheme.typography.titleLarge.copy(
                                 fontWeight = FontWeight.ExtraBold,
                                 color = FocusTheme.colors.primaryAccent
                             )
                         )
                         Text(
-                            text = "${bestPeriod.avgFocusedMinutes}m avg focus",
+                            text = "${bestPeriod.percentageOfWorkInBestPeriod}% of total focus",
                             style = MaterialTheme.typography.labelMedium.copy(
                                 color = FocusTheme.colors.textPrimary,
                                 fontWeight = FontWeight.Bold
@@ -617,7 +617,7 @@ private fun PeakFocusHoursCard(
                     Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
-                        text = bestPeriod.description,
+                        text = bestPeriod.explanation,
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = FocusTheme.colors.textSecondary,
                             fontSize = 11.sp
@@ -627,7 +627,7 @@ private fun PeakFocusHoursCard(
                     Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
-                        text = "💡 ${bestPeriod.recommendation}",
+                        text = "💡 Best Day: ${bestPeriod.bestDayOfWeek} • Peak Hour: ${bestPeriod.bestHourFormatted}",
                         style = MaterialTheme.typography.labelSmall.copy(
                             color = FocusTheme.colors.textPrimary,
                             fontWeight = FontWeight.SemiBold,
@@ -652,7 +652,7 @@ private fun PeakFocusHoursCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            val maxFocusedMinutes = (hourlyData.maxOfOrNull { it.focusedMinutes } ?: 1).coerceAtLeast(1)
+            val maxFocusedMinutes = (hourlyData.maxOfOrNull { it.totalFocusedMinutes } ?: 1).coerceAtLeast(1)
 
             Row(
                 modifier = Modifier
@@ -663,17 +663,17 @@ private fun PeakFocusHoursCard(
                 verticalAlignment = Alignment.Bottom
             ) {
                 hourlyData.forEach { hour ->
-                    val fraction = (hour.focusedMinutes.toFloat() / maxFocusedMinutes.toFloat()).coerceIn(0.06f, 1f)
-                    val isPeak = hour.hour >= bestPeriod.startHour && hour.hour < bestPeriod.endHour && hour.focusedMinutes > 0
+                    val fraction = (hour.totalFocusedMinutes.toFloat() / maxFocusedMinutes.toFloat()).coerceIn(0.06f, 1f)
+                    val isPeak = hour.hour >= bestPeriod.startHour && hour.hour < bestPeriod.endHour && hour.totalFocusedMinutes > 0
 
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Bottom,
                         modifier = Modifier.width(18.dp)
                     ) {
-                        if (hour.focusedMinutes > 0) {
+                        if (hour.totalFocusedMinutes > 0) {
                             Text(
-                                text = "${hour.focusedMinutes}",
+                                text = "${hour.totalFocusedMinutes}",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     color = if (isPeak) FocusTheme.colors.primaryAccent else FocusTheme.colors.textSecondary,
                                     fontSize = 8.sp,
@@ -690,7 +690,7 @@ private fun PeakFocusHoursCard(
                                 .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
                                 .background(
                                     if (isPeak) FocusTheme.colors.primaryAccent
-                                    else if (hour.focusedMinutes > 0) FocusTheme.colors.primaryAccent.copy(alpha = 0.45f)
+                                    else if (hour.totalFocusedMinutes > 0) FocusTheme.colors.primaryAccent.copy(alpha = 0.45f)
                                     else FocusTheme.colors.surfaceVariant
                                 )
                         )
@@ -757,9 +757,8 @@ private fun WeeklyHeatmapCard(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Heatmap Matrix
-            // 7 Columns (Mon..Sun) and 19 rows (5..23)
-            val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+            // Heatmap Matrix: 7 Columns (Mon..Sun) and 19 rows (5..23)
+            val dayNames = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
             // Days Header
             Row(
@@ -767,7 +766,7 @@ private fun WeeklyHeatmapCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Box(modifier = Modifier.width(32.dp)) // Hour label space
-                days.forEach { day ->
+                dayNames.forEach { day ->
                     Text(
                         text = day,
                         style = MaterialTheme.typography.labelSmall.copy(
@@ -804,7 +803,8 @@ private fun WeeklyHeatmapCard(
                     )
 
                     // 7 Days
-                    (1..7).forEach { dayOfWeek ->
+                    (1..7).forEach { dayVal ->
+                        val dayOfWeek = DayOfWeek.of(dayVal)
                         val cell = cells.find { it.dayOfWeek == dayOfWeek && it.hour == hour }
                         val focusedMinutes = cell?.focusedMinutes ?: 0
                         val isSelected = selectedCell?.dayOfWeek == dayOfWeek && selectedCell.hour == hour
@@ -922,11 +922,11 @@ private fun DistractionIntelligenceCard(
                     )
                 }
 
-                if (distractionData.periodChangePercent != null) {
-                    val isImprovement = distractionData.periodChangePercent < 0
+                if (distractionData.periodChangePercentage != null) {
+                    val isImprovement = distractionData.isImprovement
                     val changeColor = if (isImprovement) FocusTheme.colors.success else FocusTheme.colors.error
                     Text(
-                        text = "${if (isImprovement) "" else "+"}${distractionData.periodChangePercent}% vs prev",
+                        text = "${if (distractionData.periodChangePercentage!! > 0) "+" else ""}${distractionData.periodChangePercentage!!.toInt()}% vs prev",
                         style = MaterialTheme.typography.labelSmall.copy(
                             color = changeColor,
                             fontWeight = FontWeight.Bold,
@@ -945,13 +945,13 @@ private fun DistractionIntelligenceCard(
             ) {
                 AnalyticsStatTile(
                     label = "Total Distraction",
-                    value = LiveTimerSnapshot.formatDuration(distractionData.totalDistractionDurationSeconds),
-                    color = if (distractionData.totalDistractionDurationSeconds > 0) FocusTheme.colors.error else FocusTheme.colors.success,
+                    value = LiveTimerSnapshot.formatDuration(distractionData.totalDistractionSeconds),
+                    color = if (distractionData.totalDistractionSeconds > 0) FocusTheme.colors.error else FocusTheme.colors.success,
                     modifier = Modifier.weight(1f)
                 )
                 AnalyticsStatTile(
                     label = "Incidents",
-                    value = "${distractionData.totalDistractionCount}",
+                    value = "${distractionData.totalDistractionsCount}",
                     color = FocusTheme.colors.textPrimary,
                     modifier = Modifier.weight(1f)
                 )
@@ -971,19 +971,19 @@ private fun DistractionIntelligenceCard(
             ) {
                 AnalyticsStatTile(
                     label = "Avg Incident",
-                    value = "${distractionData.avgDistractionDurationSeconds}s",
+                    value = "${distractionData.averageDistractionSeconds}s",
                     color = FocusTheme.colors.textPrimary,
                     modifier = Modifier.weight(1f)
                 )
                 AnalyticsStatTile(
                     label = "Longest Visit",
-                    value = LiveTimerSnapshot.formatDuration(distractionData.longestDistractionDurationSeconds),
+                    value = LiveTimerSnapshot.formatDuration(distractionData.longestDistractionSeconds),
                     color = FocusTheme.colors.warning,
                     modifier = Modifier.weight(1f)
                 )
                 AnalyticsStatTile(
                     label = "Session Share",
-                    value = "${distractionData.distractionPercentage}%",
+                    value = "${distractionData.distractionPercentage.toInt()}%",
                     color = if (distractionData.distractionPercentage > 10f) FocusTheme.colors.error else FocusTheme.colors.success,
                     modifier = Modifier.weight(1f)
                 )
@@ -1090,7 +1090,7 @@ private fun DistractionIntelligenceCard(
             }
 
             // Distraction Patterns Summary
-            if (patterns.peakDistractionHour != null) {
+            if (patterns.mostDistractingHourFormatted != "N/A") {
                 Spacer(modifier = Modifier.height(14.dp))
                 Box(
                     modifier = Modifier
@@ -1110,14 +1110,14 @@ private fun DistractionIntelligenceCard(
                             )
                         )
                         Text(
-                            text = "Most distractions cluster around ${String.format("%02d:00", patterns.peakDistractionHour)} with an average recovery time of ${patterns.averageReturnToFocusSeconds}s.",
+                            text = "Most distractions cluster around ${patterns.mostDistractingHourFormatted} (${patterns.mostDistractingDay}) averaging ${patterns.distractionsPerSession} distractions per session.",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = FocusTheme.colors.textPrimary,
                                 fontSize = 11.sp
                             )
                         )
                         Text(
-                            text = "Behavior: ${patterns.switchingBehavior}",
+                            text = "Observation: ${patterns.observationSummary}",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = FocusTheme.colors.textSecondary,
                                 fontSize = 10.sp
@@ -1149,7 +1149,7 @@ private fun TaskFocusComparisonCard(taskEfficiency: TaskEfficiencySummary) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Assignment,
+                        imageVector = Icons.AutoMirrored.Filled.Assignment,
                         contentDescription = null,
                         tint = FocusTheme.colors.primaryAccent,
                         modifier = Modifier.size(20.dp)
@@ -1165,7 +1165,7 @@ private fun TaskFocusComparisonCard(taskEfficiency: TaskEfficiencySummary) {
                 }
 
                 Text(
-                    text = "${taskEfficiency.averageEstimationAccuracy.toInt()}% Accuracy",
+                    text = "${taskEfficiency.averageEstimationAccuracy}% Accuracy",
                     style = MaterialTheme.typography.labelMedium.copy(
                         color = FocusTheme.colors.primaryAccent,
                         fontWeight = FontWeight.Bold
@@ -1176,32 +1176,35 @@ private fun TaskFocusComparisonCard(taskEfficiency: TaskEfficiencySummary) {
             Spacer(modifier = Modifier.height(14.dp))
 
             // Symmetric accuracy & planned vs actual overview
+            val plannedHours = taskEfficiency.overallEstimatedMinutes / 60f
+            val focusedHours = taskEfficiency.overallActualFocusedMinutes / 60f
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 AnalyticsStatTile(
                     label = "Planned Hours",
-                    value = "${String.format("%.1f", taskEfficiency.totalPlannedHours)}h",
+                    value = "${String.format("%.1f", plannedHours)}h",
                     color = FocusTheme.colors.textPrimary,
                     modifier = Modifier.weight(1f)
                 )
                 AnalyticsStatTile(
                     label = "Focused Hours",
-                    value = "${String.format("%.1f", taskEfficiency.totalFocusedHours)}h",
+                    value = "${String.format("%.1f", focusedHours)}h",
                     color = FocusTheme.colors.primaryAccent,
                     modifier = Modifier.weight(1f)
                 )
                 AnalyticsStatTile(
                     label = "Accuracy",
-                    value = "${taskEfficiency.averageEstimationAccuracy.toInt()}%",
+                    value = "${taskEfficiency.averageEstimationAccuracy}%",
                     color = FocusTheme.colors.success,
                     modifier = Modifier.weight(1f)
                 )
             }
 
             // Category Focus Breakdown
-            if (taskEfficiency.categoryAnalytics.isNotEmpty()) {
+            if (taskEfficiency.categoryBreakdown.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(18.dp))
                 Text(
                     text = "CATEGORY FOCUS DISTRIBUTION",
@@ -1216,7 +1219,8 @@ private fun TaskFocusComparisonCard(taskEfficiency: TaskEfficiencySummary) {
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    taskEfficiency.categoryAnalytics.forEach { cat ->
+                    taskEfficiency.categoryBreakdown.forEach { cat ->
+                        val catHours = cat.totalFocusedMinutes / 60f
                         Column {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -1231,7 +1235,7 @@ private fun TaskFocusComparisonCard(taskEfficiency: TaskEfficiencySummary) {
                                     )
                                 )
                                 Text(
-                                    text = "${String.format("%.1f", cat.totalFocusedHours)}h (${cat.percentageOfTotalFocus.toInt()}%)",
+                                    text = "${String.format("%.1f", catHours)}h (${cat.percentageOfTotalFocus}%)",
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         color = FocusTheme.colors.primaryAccent,
                                         fontWeight = FontWeight.Bold
@@ -1248,7 +1252,7 @@ private fun TaskFocusComparisonCard(taskEfficiency: TaskEfficiencySummary) {
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .fillMaxWidth((cat.percentageOfTotalFocus / 100f).coerceIn(0f, 1f))
+                                        .fillMaxWidth((cat.percentageOfTotalFocus.toFloat() / 100f).coerceIn(0f, 1f))
                                         .fillMaxHeight()
                                         .clip(RoundedCornerShape(3.dp))
                                         .background(FocusTheme.colors.primaryAccent)
@@ -1260,7 +1264,7 @@ private fun TaskFocusComparisonCard(taskEfficiency: TaskEfficiencySummary) {
             }
 
             // Linked Tasks comparison list
-            if (taskEfficiency.tasksWithComparison.isNotEmpty()) {
+            if (taskEfficiency.taskComparisons.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(18.dp))
                 Text(
                     text = "LINKED TASKS VS ACTUAL TIME",
@@ -1275,7 +1279,7 @@ private fun TaskFocusComparisonCard(taskEfficiency: TaskEfficiencySummary) {
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    taskEfficiency.tasksWithComparison.take(5).forEach { taskItem ->
+                    taskEfficiency.taskComparisons.take(5).forEach { taskItem ->
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1315,7 +1319,7 @@ private fun TaskFocusComparisonCard(taskEfficiency: TaskEfficiencySummary) {
                                         .padding(horizontal = 8.dp, vertical = 4.dp)
                                 ) {
                                     Text(
-                                        text = "${taskItem.estimationAccuracyPercent.toInt()}% Acc",
+                                        text = "${taskItem.estimationAccuracyPercentage}% Acc",
                                         style = MaterialTheme.typography.labelSmall.copy(
                                             color = FocusTheme.colors.primaryAccent,
                                             fontWeight = FontWeight.Bold,
@@ -1361,17 +1365,17 @@ private fun ProductivityInsightsList(insights: List<ProductivityInsight>) {
 
         insights.forEach { insight ->
             val icon = when (insight.type) {
-                InsightType.STRENGTH -> Icons.Default.CheckCircle
-                InsightType.IMPROVEMENT -> Icons.Default.Lightbulb
-                InsightType.PATTERN -> Icons.Default.Timeline
-                InsightType.MILESTONE -> Icons.Default.Star
+                InsightType.POSITIVE_TREND -> Icons.Default.CheckCircle
+                InsightType.OPPORTUNITY -> Icons.Default.Lightbulb
+                InsightType.SCHEDULING_SUGGESTION -> Icons.Default.Timeline
+                InsightType.TASK_EFFICIENCY -> Icons.Default.Star
             }
 
             val accentColor = when (insight.type) {
-                InsightType.STRENGTH -> FocusTheme.colors.success
-                InsightType.IMPROVEMENT -> FocusTheme.colors.warning
-                InsightType.PATTERN -> FocusTheme.colors.primaryAccent
-                InsightType.MILESTONE -> Color(0xFFFFB300)
+                InsightType.POSITIVE_TREND -> FocusTheme.colors.success
+                InsightType.OPPORTUNITY -> FocusTheme.colors.warning
+                InsightType.SCHEDULING_SUGGESTION -> FocusTheme.colors.primaryAccent
+                InsightType.TASK_EFFICIENCY -> Color(0xFFFFB300)
             }
 
             FocusCard {
@@ -1408,7 +1412,7 @@ private fun ProductivityInsightsList(insights: List<ProductivityInsight>) {
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = insight.type.name,
+                                text = insight.type.label,
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     color = accentColor,
                                     fontWeight = FontWeight.Bold,
@@ -1421,7 +1425,7 @@ private fun ProductivityInsightsList(insights: List<ProductivityInsight>) {
                     Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
-                        text = insight.description,
+                        text = insight.message,
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = FocusTheme.colors.textSecondary,
                             lineHeight = 16.sp,
@@ -1438,24 +1442,13 @@ private fun ProductivityInsightsList(insights: List<ProductivityInsight>) {
                             .background(FocusTheme.colors.surfaceVariant)
                             .padding(8.dp)
                     ) {
-                        Column {
-                            Text(
-                                text = "Actionable Advice: ${insight.recommendation}",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    color = FocusTheme.colors.textPrimary,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 10.sp
-                                )
+                        Text(
+                            text = "Evidence: ${insight.evidence}",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = FocusTheme.colors.textSecondary,
+                                fontSize = 10.sp
                             )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Evidence: ${insight.evidenceTag}",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    color = FocusTheme.colors.textSecondary,
-                                    fontSize = 9.sp
-                                )
-                            )
-                        }
+                        )
                     }
                 }
             }

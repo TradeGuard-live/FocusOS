@@ -93,7 +93,7 @@ abstract class FocusDatabase : RoomDatabase() {
                         `appSwitchCount` INTEGER NOT NULL DEFAULT 0,
                         `createdAt` INTEGER NOT NULL DEFAULT 0,
                         `updatedAt` INTEGER NOT NULL DEFAULT 0,
-                        FOREIGN KEY(`linkedTaskId`) REFERENCES `tasks`(`id`) ON UPDATE NO ACTION ON DELETE SET_NULL
+                        FOREIGN KEY(`linkedTaskId`) REFERENCES `tasks`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL
                     )
                     """.trimIndent()
                 )

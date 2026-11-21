@@ -33,7 +33,9 @@ enum class ScoreCategory(val displayName: String, val minScore: Int, val maxScor
 enum class RecommendationConfidence(val label: String) {
     LOW("Low Confidence"),
     MODERATE("Moderate Confidence"),
-    HIGH("High Confidence")
+    HIGH("High Confidence");
+
+    val displayName: String get() = label
 }
 
 enum class InsightType(val label: String) {
@@ -49,7 +51,9 @@ enum class AnalyticsDateFilter(val label: String) {
     LAST_7_DAYS("Last 7 Days"),
     LAST_30_DAYS("Last 30 Days"),
     THIS_MONTH("This Month"),
-    ALL("All Time")
+    ALL("All Time");
+
+    val displayName: String get() = label
 }
 
 // =============================================================================
@@ -127,6 +131,9 @@ data class BestFocusPeriodRecommendation(
     val percentageOfWorkInBestPeriod: Int,
     val explanation: String
 ) {
+    val startHour: Int get() = bestTwoHourStart
+    val endHour: Int get() = (bestTwoHourStart + 2) % 24
+
     companion object {
         val EMPTY = BestFocusPeriodRecommendation(
             bestHour = 9,
@@ -157,7 +164,8 @@ data class DistractionDashboardData(
     val distractionPercentage: Float,       // Distraction / (Focused + Distraction)
     val previousPeriodSeconds: Long? = null,
     val periodChangePercentage: Float? = null,
-    val isImprovement: Boolean = false
+    val isImprovement: Boolean = false,
+    val rankedApps: List<AppProductivityStat> = emptyList()
 )
 
 data class DistractionTimelineItem(

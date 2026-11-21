@@ -97,26 +97,34 @@ data class FocusUiState(
     val focusScore: FocusScoreDetail = FocusScoreDetail.EMPTY,
     val hourlyProductivity: List<HourlyProductivity> = emptyList(),
     val weeklyHeatmap: List<HeatmapCell> = emptyList(),
-    val bestFocusPeriod: BestFocusPeriodRecommendation = BestFocusPeriodRecommendation(
-        startHour = 9,
-        endHour = 11,
-        avgFocusedMinutes = 0,
-        score = 0,
-        confidence = RecommendationConfidence.LOW,
-        description = "Insufficient data",
-        recommendation = "Complete more sessions to identify your peak hours"
-    ),
+    val bestFocusPeriod: BestFocusPeriodRecommendation = BestFocusPeriodRecommendation.EMPTY,
     val distractionDashboard: DistractionDashboardData = DistractionDashboardData(
-        totalDistractionDurationSeconds = 0,
-        totalDistractionCount = 0,
+        totalDistractionSeconds = 0L,
+        totalDistractionsCount = 0,
         totalAppSwitches = 0,
-        avgDistractionDurationSeconds = 0,
-        longestDistractionDurationSeconds = 0,
+        averageDistractionSeconds = 0L,
+        longestDistractionSeconds = 0L,
+        mostDistractingAppName = "None",
         distractionPercentage = 0f,
         rankedApps = emptyList()
     ),
-    val distractionPatterns: DistractionPatternReport = DistractionPatternReport(),
-    val taskEfficiency: TaskEfficiencySummary = TaskEfficiencySummary(0, 0, 0, 0, 0f, emptyList(), emptyList()),
+    val distractionPatterns: DistractionPatternReport = DistractionPatternReport(
+        mostDistractingHourFormatted = "N/A",
+        mostDistractingDay = "N/A",
+        mostFrequentlyOpenedApp = "None",
+        appWithLongestAverageVisit = "None",
+        distractionsPerSession = 0f,
+        observationSummary = "No distraction patterns detected."
+    ),
+    val taskEfficiency: TaskEfficiencySummary = TaskEfficiencySummary(
+        averageEstimationAccuracy = 0,
+        overallEstimatedMinutes = 0,
+        overallActualFocusedMinutes = 0,
+        completedTasksLinked = 0,
+        categoryBreakdown = emptyList(),
+        taskComparisons = emptyList(),
+        insights = emptyList()
+    ),
     val productivityInsights: List<ProductivityInsight> = emptyList()
 )
 
@@ -128,6 +136,7 @@ class FocusViewModel(application: Application) : AndroidViewModel(application) {
     private val prefsManager = UserPreferencesManager(application)
     private val usageMonitor = AppUsageMonitor(AndroidAppUsageProvider(application))
     private val analyticsEngine = FocusAnalyticsEngine()
+    private val advancedAnalyticsEngine = AdvancedAnalyticsEngine()
     private val dateFilterFlow = MutableStateFlow(AnalyticsDateFilter.LAST_7_DAYS)
 
     private val _uiState = MutableStateFlow(FocusUiState())
@@ -200,19 +209,18 @@ class FocusViewModel(application: Application) : AndroidViewModel(application) {
                     val filteredSessions = AdvancedAnalyticsEngine.filterSessionsByDate(sessions, filter)
                     val filteredUsages = AdvancedAnalyticsEngine.filterUsagesByDate(usages, filter)
 
-                    val prevFilter = AdvancedAnalyticsEngine.getPreviousPeriodFilter(filter)
-                    val prevSessions = prevFilter?.let { AdvancedAnalyticsEngine.filterSessionsByDate(sessions, it) } ?: emptyList()
-                    val prevUsages = prevFilter?.let { AdvancedAnalyticsEngine.filterUsagesByDate(usages, it) } ?: emptyList()
+                    val prevSessions = AdvancedAnalyticsEngine.getPreviousPeriodSessions(sessions, filter)
+                    val prevUsages = AdvancedAnalyticsEngine.getPreviousPeriodUsages(usages, filter)
 
-                    val score = AdvancedAnalyticsEngine.calculateFocusScore(filteredSessions, filteredUsages)
-                    val hourly = AdvancedAnalyticsEngine.calculateHourlyProductivity(filteredSessions)
-                    val heatmap = AdvancedAnalyticsEngine.generateWeeklyHeatmap(sessions)
-                    val bestPeriod = AdvancedAnalyticsEngine.identifyBestFocusPeriod(hourly, filteredSessions.size)
-                    val distractions = AdvancedAnalyticsEngine.calculateDistractionDashboard(filteredSessions, filteredUsages, prevSessions, prevUsages)
-                    val patterns = AdvancedAnalyticsEngine.analyzeDistractionPatterns(filteredSessions, filteredUsages)
-                    val taskEff = AdvancedAnalyticsEngine.calculateTaskFocusComparison(tasks, categories, sessions)
-                    val insights = AdvancedAnalyticsEngine.generateProductivityInsights(
-                        filteredSessions, filteredUsages, score, bestPeriod, distractions, taskEff, filter
+                    val score = advancedAnalyticsEngine.calculateFocusScore(filteredSessions, prevSessions)
+                    val hourly = advancedAnalyticsEngine.calculateHourlyProductivity(filteredSessions)
+                    val heatmap = advancedAnalyticsEngine.calculateWeeklyHeatmap(sessions)
+                    val bestPeriod = advancedAnalyticsEngine.determineBestFocusPeriod(filteredSessions)
+                    val distractions = advancedAnalyticsEngine.calculateDistractionIntelligence(filteredSessions, filteredUsages, prevSessions, prevUsages)
+                    val patterns = advancedAnalyticsEngine.calculateDistractionPatterns(filteredUsages, filteredSessions.size)
+                    val taskEff = advancedAnalyticsEngine.calculateTaskFocusComparison(tasks, categories, sessions)
+                    val insights = advancedAnalyticsEngine.generateProductivityInsights(
+                        filteredSessions, score, bestPeriod, distractions, taskEff
                     )
 
                     _uiState.update { current ->

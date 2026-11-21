@@ -106,7 +106,7 @@ enum class MonitoringStatus(val displayName: String) {
 data class FocusSessionEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
-    val title: String,
+    val title: String = "Focus Session",
     val description: String? = null,
     val linkedTaskId: Long? = null,
     val category: String? = null,

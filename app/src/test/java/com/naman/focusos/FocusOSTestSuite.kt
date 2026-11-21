@@ -3,6 +3,7 @@ package com.naman.focusos
 import androidx.compose.ui.graphics.Color
 import com.naman.focusos.data.model.AppClassification
 import com.naman.focusos.data.model.AppClassificationEntity
+import com.naman.focusos.data.model.CategoryEntity
 import com.naman.focusos.data.model.FocusAppUsageEntity
 import com.naman.focusos.data.model.FocusPauseEntity
 import com.naman.focusos.data.model.FocusSessionEntity
@@ -23,14 +24,29 @@ import com.naman.focusos.data.preferences.UserSettings
 import com.naman.focusos.domain.analytics.ProductivityIntelligenceEngine
 import com.naman.focusos.domain.excel.ExcelManager
 import com.naman.focusos.domain.excel.FullBackupData
+import com.naman.focusos.domain.focus.AdvancedAnalyticsEngine
+import com.naman.focusos.domain.focus.AnalyticsDateFilter
 import com.naman.focusos.domain.focus.AppProductivityStat
 import com.naman.focusos.domain.focus.AppUsageMonitor
 import com.naman.focusos.domain.focus.AppUsageProvider
+import com.naman.focusos.domain.focus.BestFocusPeriodRecommendation
+import com.naman.focusos.domain.focus.CategoryFocusAnalytics
 import com.naman.focusos.domain.focus.DailyFocusStats
+import com.naman.focusos.domain.focus.DistractionDashboardData
+import com.naman.focusos.domain.focus.DistractionPatternReport
 import com.naman.focusos.domain.focus.FocusAnalyticsEngine
+import com.naman.focusos.domain.focus.FocusScoreDetail
 import com.naman.focusos.domain.focus.FocusTimerEngine
+import com.naman.focusos.domain.focus.HeatmapCell
+import com.naman.focusos.domain.focus.HourlyProductivity
+import com.naman.focusos.domain.focus.InsightType
 import com.naman.focusos.domain.focus.LiveTimerSnapshot
+import com.naman.focusos.domain.focus.ProductivityInsight
 import com.naman.focusos.domain.focus.RawUsageInterval
+import com.naman.focusos.domain.focus.RecommendationConfidence
+import com.naman.focusos.domain.focus.ScoreCategory
+import com.naman.focusos.domain.focus.TaskEfficiencySummary
+import com.naman.focusos.domain.focus.TaskFocusComparison
 import com.naman.focusos.domain.focus.WeeklyFocusStats
 import com.naman.focusos.domain.scheduler.HabitSyncEngine
 import com.naman.focusos.domain.scheduler.RecurrenceEngine
@@ -1957,5 +1973,510 @@ class FocusOSTestSuite {
         assertEquals("01:15:20", LiveTimerSnapshot.formatDuration(4520L))
         assertEquals("00:00", LiveTimerSnapshot.formatDuration(0L))
         assertEquals("00:00", LiveTimerSnapshot.formatDuration(-10L))
+    }
+
+    // =========================================================================
+    // 10. ADVANCED PRODUCTIVITY INTELLIGENCE & ANALYTICS TESTS
+    // =========================================================================
+
+    @Test
+    fun testFocusScoreProvisionalWhenEmpty() {
+        val engine = AdvancedAnalyticsEngine(zoneId = java.time.ZoneId.of("UTC"))
+        val score = engine.calculateFocusScore(emptyList())
+
+        assertEquals(0, score.overallScore)
+        assertEquals(ScoreCategory.INSUFFICIENT_DATA, score.category)
+        assertTrue(score.isProvisional)
+        assertEquals(0, score.sessionsIncludedCount)
+    }
+
+    @Test
+    fun testFocusScoreProvisionalWhenLessThan15Minutes() {
+        val engine = AdvancedAnalyticsEngine(zoneId = java.time.ZoneId.of("UTC"))
+        val sessions = listOf(
+            FocusSessionEntity(
+                id = 1L,
+                title = "Short 10-min Session",
+                focusedDurationSeconds = 600L,
+                sessionStatus = SessionStatus.COMPLETED
+            )
+        )
+        val score = engine.calculateFocusScore(sessions)
+
+        assertEquals(0, score.overallScore)
+        assertEquals(ScoreCategory.INSUFFICIENT_DATA, score.category)
+        assertTrue(score.isProvisional)
+        assertEquals(1, score.sessionsIncludedCount)
+    }
+
+    @Test
+    fun testFocusScoreOutstandingWithHighPerformance() {
+        val engine = AdvancedAnalyticsEngine(zoneId = java.time.ZoneId.of("UTC"))
+        val baseTime = 1732147200000L // 2026-11-21 00:00:00 UTC
+        val sessions = (0..6).map { day ->
+            FocusSessionEntity(
+                id = day.toLong() + 1,
+                title = "Daily Deep Work",
+                startTimestamp = baseTime + (day * 86400_000L) + (9 * 3600_000L),
+                targetDurationSeconds = 3600L,
+                focusedDurationSeconds = 3600L,
+                distractedDurationSeconds = 0L,
+                distractionCount = 0,
+                appSwitchCount = 0,
+                sessionStatus = SessionStatus.COMPLETED
+            )
+        }
+
+        val score = engine.calculateFocusScore(sessions, periodDays = 7)
+
+        assertFalse(score.isProvisional)
+        assertTrue(score.overallScore >= 90)
+        assertEquals(ScoreCategory.OUTSTANDING, score.category)
+        assertEquals(100f, score.focusCompletionScore, 0.1f)
+        assertEquals(100f, score.distractionControlScore, 0.1f)
+        assertEquals(7, score.sessionsIncludedCount)
+        assertTrue(score.positiveContributors.isNotEmpty())
+    }
+
+    @Test
+    fun testFocusScoreFairScalingForOpenEndedSessions() {
+        val engine = AdvancedAnalyticsEngine(zoneId = java.time.ZoneId.of("UTC"))
+        val sessions = listOf(
+            FocusSessionEntity(
+                id = 1L,
+                title = "Open Flow",
+                targetDurationSeconds = 0L,
+                focusedDurationSeconds = 1800L,
+                sessionStatus = SessionStatus.COMPLETED
+            )
+        )
+
+        val score = engine.calculateFocusScore(sessions)
+
+        assertEquals(100f, score.focusCompletionScore, 0.1f)
+    }
+
+    @Test
+    fun testFocusScoreExcludesCancelledSessions() {
+        val engine = AdvancedAnalyticsEngine(zoneId = java.time.ZoneId.of("UTC"))
+        val sessions = listOf(
+            FocusSessionEntity(
+                id = 1L,
+                title = "Accidentally Started",
+                targetDurationSeconds = 1500L,
+                focusedDurationSeconds = 30L,
+                sessionStatus = SessionStatus.CANCELLED
+            ),
+            FocusSessionEntity(
+                id = 2L,
+                title = "Completed Session",
+                targetDurationSeconds = 1800L,
+                focusedDurationSeconds = 1800L,
+                sessionStatus = SessionStatus.COMPLETED
+            )
+        )
+
+        val score = engine.calculateFocusScore(sessions)
+
+        assertEquals(1, score.sessionsIncludedCount)
+        assertEquals(100f, score.focusCompletionScore, 0.1f)
+    }
+
+    @Test
+    fun testFocusScorePeriodTrendCalculation() {
+        val engine = AdvancedAnalyticsEngine(zoneId = java.time.ZoneId.of("UTC"))
+        val prevSessions = listOf(
+            FocusSessionEntity(
+                id = 1L,
+                title = "Past Session",
+                targetDurationSeconds = 1800L,
+                focusedDurationSeconds = 1200L,
+                distractedDurationSeconds = 600L,
+                appSwitchCount = 10,
+                sessionStatus = SessionStatus.COMPLETED
+            )
+        )
+        val currentSessions = listOf(
+            FocusSessionEntity(
+                id = 2L,
+                title = "Current Session",
+                targetDurationSeconds = 1800L,
+                focusedDurationSeconds = 1800L,
+                distractedDurationSeconds = 0L,
+                appSwitchCount = 0,
+                sessionStatus = SessionStatus.COMPLETED
+            )
+        )
+
+        val score = engine.calculateFocusScore(currentSessions, previousPeriodSessions = prevSessions)
+
+        assertNotNull(score.previousPeriodScore)
+        assertNotNull(score.trendPercentage)
+        assertTrue(score.trendPercentage!! > 0f)
+    }
+
+    @Test
+    fun testHourlyProductivity24HourBucketing() {
+        val engine = AdvancedAnalyticsEngine(zoneId = java.time.ZoneId.of("UTC"))
+        val baseMidnight = 1732147200000L
+        val sessions = listOf(
+            FocusSessionEntity(
+                id = 1L,
+                startTimestamp = baseMidnight + (9 * 3600_000L),
+                focusedDurationSeconds = 1800L,
+                distractedDurationSeconds = 120L,
+                sessionStatus = SessionStatus.COMPLETED
+            ),
+            FocusSessionEntity(
+                id = 2L,
+                startTimestamp = baseMidnight + (9 * 3600_000L) + (35 * 60_000L),
+                focusedDurationSeconds = 1200L,
+                sessionStatus = SessionStatus.COMPLETED
+            ),
+            FocusSessionEntity(
+                id = 3L,
+                startTimestamp = baseMidnight + (14 * 3600_000L),
+                focusedDurationSeconds = 2400L,
+                sessionStatus = SessionStatus.COMPLETED
+            )
+        )
+
+        val hourly = engine.calculateHourlyProductivity(sessions)
+
+        assertEquals(24, hourly.size)
+        val hour9 = hourly.find { it.hour == 9 }!!
+        assertEquals(50, hour9.totalFocusedMinutes)
+        assertEquals(2, hour9.sessionCount)
+
+        val hour14 = hourly.find { it.hour == 14 }!!
+        assertEquals(40, hour14.totalFocusedMinutes)
+        assertEquals(1, hour14.sessionCount)
+
+        val hour0 = hourly.find { it.hour == 0 }!!
+        assertEquals(0, hour0.totalFocusedMinutes)
+    }
+
+    @Test
+    fun testHourlyProductivityMidnightCrossing() {
+        val engine = AdvancedAnalyticsEngine(zoneId = java.time.ZoneId.of("UTC"))
+        val baseMidnight = 1732147200000L
+        val session = FocusSessionEntity(
+            id = 1L,
+            startTimestamp = baseMidnight + (23 * 3600_000L) + (30 * 60_000L),
+            focusedDurationSeconds = 3600L,
+            sessionStatus = SessionStatus.COMPLETED
+        )
+
+        val hourly = engine.calculateHourlyProductivity(listOf(session))
+
+        val hour23 = hourly.find { it.hour == 23 }!!
+        val hour0 = hourly.find { it.hour == 0 }!!
+
+        assertEquals(30, hour23.totalFocusedMinutes)
+        assertEquals(30, hour0.totalFocusedMinutes)
+    }
+
+    @Test
+    fun testWeeklyHeatmap133CellsGenerated() {
+        val engine = AdvancedAnalyticsEngine(zoneId = java.time.ZoneId.of("UTC"))
+        val heatmap = engine.calculateWeeklyHeatmap(emptyList())
+
+        assertEquals(133, heatmap.size)
+        assertTrue(heatmap.all { it.hour in 5..23 })
+        assertEquals(19, heatmap.count { it.dayOfWeek == DayOfWeek.MONDAY })
+        assertEquals(19, heatmap.count { it.dayOfWeek == DayOfWeek.SUNDAY })
+    }
+
+    @Test
+    fun testWeeklyHeatmapIntensityMapping() {
+        val engine = AdvancedAnalyticsEngine(zoneId = java.time.ZoneId.of("UTC"))
+        val monday = 1731888000000L
+        val sessions = listOf(
+            FocusSessionEntity(
+                id = 1L,
+                startTimestamp = monday + (10 * 3600_000L),
+                focusedDurationSeconds = 2700L,
+                distractedDurationSeconds = 300L,
+                sessionStatus = SessionStatus.COMPLETED
+            )
+        )
+
+        val heatmap = engine.calculateWeeklyHeatmap(sessions)
+        val mon10Cell = heatmap.find { it.dayOfWeek == DayOfWeek.MONDAY && it.hour == 10 }!!
+
+        assertEquals(45, mon10Cell.focusedMinutes)
+        assertEquals(1, mon10Cell.sessionCount)
+        assertEquals(5, mon10Cell.distractionMinutes)
+    }
+
+    @Test
+    fun testBestFocusPeriodIdentification() {
+        val engine = AdvancedAnalyticsEngine(zoneId = java.time.ZoneId.of("UTC"))
+        val baseTime = 1732147200000L
+        val sessions = listOf(
+            FocusSessionEntity(id = 1, startTimestamp = baseTime + (8 * 3600_000L), focusedDurationSeconds = 3600L, sessionStatus = SessionStatus.COMPLETED),
+            FocusSessionEntity(id = 2, startTimestamp = baseTime + (9 * 3600_000L), focusedDurationSeconds = 3600L, sessionStatus = SessionStatus.COMPLETED)
+        )
+
+        val recommendation = engine.determineBestFocusPeriod(sessions)
+
+        assertEquals(8, recommendation.bestTwoHourStart)
+        assertEquals(8, recommendation.startHour)
+        assertEquals(10, recommendation.endHour)
+    }
+
+    @Test
+    fun testBestFocusPeriodConfidenceTiers() {
+        val engine = AdvancedAnalyticsEngine(zoneId = java.time.ZoneId.of("UTC"))
+        val baseTime = 1732147200000L
+
+        val lowSessions = (1..3).map {
+            FocusSessionEntity(id = it.toLong(), startTimestamp = baseTime, focusedDurationSeconds = 1800L, sessionStatus = SessionStatus.COMPLETED)
+        }
+        val recLow = engine.determineBestFocusPeriod(lowSessions)
+        assertEquals(RecommendationConfidence.LOW, recLow.confidence)
+
+        val modSessions = (1..6).map {
+            FocusSessionEntity(id = it.toLong(), startTimestamp = baseTime + ((it % 3) * 86400_000L), focusedDurationSeconds = 1800L, sessionStatus = SessionStatus.COMPLETED)
+        }
+        val recMod = engine.determineBestFocusPeriod(modSessions)
+        assertEquals(RecommendationConfidence.MODERATE, recMod.confidence)
+
+        val highSessions = (1..12).map {
+            FocusSessionEntity(id = it.toLong(), startTimestamp = baseTime + ((it % 4) * 86400_000L), focusedDurationSeconds = 1800L, sessionStatus = SessionStatus.COMPLETED)
+        }
+        val recHigh = engine.determineBestFocusPeriod(highSessions)
+        assertEquals(RecommendationConfidence.HIGH, recHigh.confidence)
+    }
+
+    @Test
+    fun testDistractionIntelligenceZeroDivisionSafety() {
+        val engine = AdvancedAnalyticsEngine()
+        val data = engine.calculateDistractionIntelligence(
+            sessions = emptyList(),
+            usages = emptyList(),
+            previousSessions = emptyList(),
+            previousUsages = emptyList()
+        )
+
+        assertEquals(0L, data.totalDistractionSeconds)
+        assertEquals(0, data.totalDistractionsCount)
+        assertEquals(0L, data.averageDistractionSeconds)
+        assertEquals(0f, data.distractionPercentage, 0.01f)
+        assertNull(data.periodChangePercentage)
+    }
+
+    @Test
+    fun testDistractionIntelligenceExcludesPausedSessionUsage() {
+        val engine = AdvancedAnalyticsEngine()
+        val usages = listOf(
+            FocusAppUsageEntity(
+                id = 1, sessionId = 1, packageName = "com.google.android.youtube", applicationName = "YouTube",
+                classification = AppClassification.DISTRACTING_APP, startTimestamp = 1000, endTimestamp = 2000,
+                durationSeconds = 100, sessionState = "ACTIVE"
+            ),
+            FocusAppUsageEntity(
+                id = 2, sessionId = 1, packageName = "com.google.android.youtube", applicationName = "YouTube",
+                classification = AppClassification.DISTRACTING_APP, startTimestamp = 2500, endTimestamp = 4500,
+                durationSeconds = 200, sessionState = "PAUSED"
+            )
+        )
+        val sessions = listOf(
+            FocusSessionEntity(id = 1, focusedDurationSeconds = 900L, sessionStatus = SessionStatus.COMPLETED)
+        )
+
+        val result = engine.calculateDistractionIntelligence(sessions, usages)
+
+        assertEquals(100L, result.totalDistractionSeconds)
+        assertEquals(1, result.totalDistractionsCount)
+    }
+
+    @Test
+    fun testDistractionIntelligencePeriodComparisonImprovement() {
+        val engine = AdvancedAnalyticsEngine()
+        val prevUsages = listOf(
+            FocusAppUsageEntity(
+                id = 1, sessionId = 1, packageName = "com.instagram.android", applicationName = "Instagram",
+                classification = AppClassification.DISTRACTING_APP, startTimestamp = 1000, endTimestamp = 3000,
+                durationSeconds = 200, sessionState = "ACTIVE"
+            )
+        )
+        val currentUsages = listOf(
+            FocusAppUsageEntity(
+                id = 2, sessionId = 2, packageName = "com.instagram.android", applicationName = "Instagram",
+                classification = AppClassification.DISTRACTING_APP, startTimestamp = 4000, endTimestamp = 5000,
+                durationSeconds = 100, sessionState = "ACTIVE"
+            )
+        )
+        val dummySessions = listOf(FocusSessionEntity(id = 1, sessionStatus = SessionStatus.COMPLETED))
+
+        val result = engine.calculateDistractionIntelligence(
+            sessions = dummySessions,
+            usages = currentUsages,
+            previousSessions = dummySessions,
+            previousUsages = prevUsages
+        )
+
+        assertEquals(-50f, result.periodChangePercentage!!, 0.1f)
+        assertTrue(result.isImprovement)
+    }
+
+    @Test
+    fun testDistractionPatternsPeakHourAndObservations() {
+        val engine = AdvancedAnalyticsEngine(zoneId = java.time.ZoneId.of("UTC"))
+        val baseTime = 1732147200000L
+        val usages = listOf(
+            FocusAppUsageEntity(
+                id = 1, sessionId = 1, packageName = "com.twitter.android", applicationName = "X",
+                classification = AppClassification.DISTRACTING_APP, startTimestamp = baseTime + (15 * 3600_000L),
+                endTimestamp = baseTime + (15 * 3600_000L) + 300_000L, durationSeconds = 300, sessionState = "ACTIVE"
+            ),
+            FocusAppUsageEntity(
+                id = 2, sessionId = 1, packageName = "com.twitter.android", applicationName = "X",
+                classification = AppClassification.DISTRACTING_APP, startTimestamp = baseTime + (15 * 3600_000L) + 400_000L,
+                endTimestamp = baseTime + (15 * 3600_000L) + 600_000L, durationSeconds = 200, sessionState = "ACTIVE"
+            )
+        )
+
+        val report = engine.calculateDistractionPatterns(usages, sessionCount = 1)
+
+        assertEquals("3 PM", report.mostDistractingHourFormatted)
+        assertEquals("X", report.mostFrequentlyOpenedApp)
+        assertEquals(2.0f, report.distractionsPerSession, 0.01f)
+    }
+
+    @Test
+    fun testSymmetricTaskEstimationAccuracyEqual() {
+        val engine = AdvancedAnalyticsEngine()
+        val accuracy = engine.calculateEstimationAccuracy(estimatedMins = 60, actualMins = 60)
+        assertEquals(100, accuracy)
+    }
+
+    @Test
+    fun testSymmetricTaskEstimationAccuracyOverAndUnderSymmetry() {
+        val engine = AdvancedAnalyticsEngine()
+        val accUnder = engine.calculateEstimationAccuracy(estimatedMins = 30, actualMins = 60)
+        val accOver = engine.calculateEstimationAccuracy(estimatedMins = 60, actualMins = 30)
+
+        assertEquals(50, accUnder)
+        assertEquals(50, accOver)
+        assertEquals(accUnder, accOver)
+    }
+
+    @Test
+    fun testTaskEfficiencySummaryAggregation() {
+        val engine = AdvancedAnalyticsEngine()
+        val tasks = listOf(
+            TaskEntity(id = 1, title = "Backend Architecture", scheduledDate = "2026-11-21", durationMinutes = 60, categoryId = 1, status = TaskStatus.COMPLETED_ON_TIME),
+            TaskEntity(id = 2, title = "Documentation", scheduledDate = "2026-11-21", durationMinutes = 30, categoryId = 1, status = TaskStatus.COMPLETED_ON_TIME)
+        )
+        val sessions = listOf(
+            FocusSessionEntity(id = 1, linkedTaskId = 1, focusedDurationSeconds = 3600L, sessionStatus = SessionStatus.COMPLETED),
+            FocusSessionEntity(id = 2, linkedTaskId = 2, focusedDurationSeconds = 1800L, sessionStatus = SessionStatus.COMPLETED)
+        )
+        val categories = listOf(CategoryEntity(id = 1, name = "Engineering", colorHex = "#2563EB"))
+
+        val summary = engine.calculateTaskFocusComparison(tasks, categories, sessions)
+
+        assertEquals(90, summary.overallEstimatedMinutes)
+        assertEquals(90, summary.overallActualFocusedMinutes)
+        assertEquals(100, summary.averageEstimationAccuracy)
+        assertEquals(2, summary.completedTasksLinked)
+        assertEquals(2, summary.taskComparisons.size)
+    }
+
+    @Test
+    fun testCategoryFocusAnalyticsDistribution() {
+        val engine = AdvancedAnalyticsEngine()
+        val tasks = listOf(
+            TaskEntity(id = 1, title = "Task A", scheduledDate = "2026-11-21", durationMinutes = 60, categoryId = 1, status = TaskStatus.COMPLETED_ON_TIME),
+            TaskEntity(id = 2, title = "Task B", scheduledDate = "2026-11-21", durationMinutes = 60, categoryId = 2, status = TaskStatus.COMPLETED_ON_TIME)
+        )
+        val sessions = listOf(
+            FocusSessionEntity(id = 1, linkedTaskId = 1, focusedDurationSeconds = 5400L, sessionStatus = SessionStatus.COMPLETED),
+            FocusSessionEntity(id = 2, linkedTaskId = 2, focusedDurationSeconds = 1800L, sessionStatus = SessionStatus.COMPLETED)
+        )
+        val categories = listOf(
+            CategoryEntity(id = 1, name = "Engineering", colorHex = "#2563EB"),
+            CategoryEntity(id = 2, name = "Design", colorHex = "#10B981")
+        )
+
+        val summary = engine.calculateTaskFocusComparison(tasks, categories, sessions)
+
+        assertEquals(2, summary.categoryBreakdown.size)
+        val eng = summary.categoryBreakdown.find { it.categoryName == "Engineering" }!!
+        val des = summary.categoryBreakdown.find { it.categoryName == "Design" }!!
+
+        assertEquals(75, eng.percentageOfTotalFocus)
+        assertEquals(25, des.percentageOfTotalFocus)
+    }
+
+    @Test
+    fun testProductivityInsightsGenerationEvidenceBased() {
+        val engine = AdvancedAnalyticsEngine()
+        val score = FocusScoreDetail.EMPTY.copy(overallScore = 88, category = ScoreCategory.EXCELLENT)
+        val bestPeriod = BestFocusPeriodRecommendation.EMPTY.copy(
+            bestHourFormatted = "10 AM",
+            confidence = RecommendationConfidence.HIGH
+        )
+        val distractionData = DistractionDashboardData(
+            totalDistractionSeconds = 60L,
+            totalDistractionsCount = 1,
+            totalAppSwitches = 1,
+            averageDistractionSeconds = 60L,
+            longestDistractionSeconds = 60L,
+            mostDistractingAppName = "None",
+            distractionPercentage = 3.5f
+        )
+        val taskEfficiency = TaskEfficiencySummary(
+            averageEstimationAccuracy = 92,
+            overallEstimatedMinutes = 120,
+            overallActualFocusedMinutes = 125,
+            completedTasksLinked = 3,
+            categoryBreakdown = emptyList(),
+            taskComparisons = emptyList(),
+            insights = emptyList()
+        )
+
+        val insights = engine.generateProductivityInsights(
+            sessions = listOf(FocusSessionEntity(id = 1, focusedDurationSeconds = 3600L, sessionStatus = SessionStatus.COMPLETED)),
+            scoreDetail = score,
+            bestPeriod = bestPeriod,
+            distractionData = distractionData,
+            taskEfficiency = taskEfficiency
+        )
+
+        assertTrue(insights.isNotEmpty())
+        assertTrue(insights.all { it.evidence.isNotBlank() })
+        assertTrue(insights.all { it.title.isNotBlank() })
+    }
+
+    @Test
+    fun testDateFilteringSessionsAndUsages() {
+        val today = LocalDate.of(2026, 11, 21)
+        val zone = java.time.ZoneId.of("UTC")
+        val todayMillis = today.atStartOfDay(zone).toInstant().toEpochMilli() + 3600_000L
+        val yesterdayMillis = today.minusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() + 3600_000L
+        val oldMillis = today.minusDays(40).atStartOfDay(zone).toInstant().toEpochMilli()
+
+        val sessions = listOf(
+            FocusSessionEntity(id = 1, startTimestamp = todayMillis),
+            FocusSessionEntity(id = 2, startTimestamp = yesterdayMillis),
+            FocusSessionEntity(id = 3, startTimestamp = oldMillis)
+        )
+
+        val todayFiltered = AdvancedAnalyticsEngine.filterSessionsByDate(sessions, AnalyticsDateFilter.TODAY, zone)
+        assertEquals(1, todayFiltered.size)
+        assertEquals(1L, todayFiltered[0].id)
+
+        val yesterdayFiltered = AdvancedAnalyticsEngine.filterSessionsByDate(sessions, AnalyticsDateFilter.YESTERDAY, zone)
+        assertEquals(1, yesterdayFiltered.size)
+        assertEquals(2L, yesterdayFiltered[0].id)
+
+        val last7DaysFiltered = AdvancedAnalyticsEngine.filterSessionsByDate(sessions, AnalyticsDateFilter.LAST_7_DAYS, zone)
+        assertEquals(2, last7DaysFiltered.size)
+
+        val allFiltered = AdvancedAnalyticsEngine.filterSessionsByDate(sessions, AnalyticsDateFilter.ALL, zone)
+        assertEquals(3, allFiltered.size)
     }
 }

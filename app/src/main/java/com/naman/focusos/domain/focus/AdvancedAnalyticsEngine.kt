@@ -184,18 +184,25 @@ class AdvancedAnalyticsEngine(
             if (s.focusedDurationSeconds <= 0) continue
             val startZdt = Instant.ofEpochMilli(s.startTimestamp).atZone(zoneId)
             val startHour = startZdt.hour
-            val durationMinutes = (s.focusedDurationSeconds / 60).toInt()
+            val totalMins = (s.focusedDurationSeconds / 60).toInt()
             val distractionMinutes = (s.distractedDurationSeconds / 60).toInt()
 
-            val bucket = hourlyBuckets[startHour]
-            bucket.totalFocusedMinutes += durationMinutes
-            bucket.sessionCount++
-            bucket.totalDistractionMinutes += distractionMinutes
+            if (totalMins > 0) {
+                var currentMinuteTime = startZdt
+                for (m in 0 until totalMins) {
+                    val h = currentMinuteTime.hour
+                    hourlyBuckets[h].totalFocusedMinutes++
+                    currentMinuteTime = currentMinuteTime.plusMinutes(1)
+                }
+            }
+
+            hourlyBuckets[startHour].sessionCount++
+            hourlyBuckets[startHour].totalDistractionMinutes += distractionMinutes
 
             if (s.targetDurationSeconds > 0 && s.focusedDurationSeconds >= s.targetDurationSeconds) {
-                bucket.targetCompletedCount++
+                hourlyBuckets[startHour].targetCompletedCount++
             } else if (s.targetDurationSeconds == 0L && s.focusedDurationSeconds >= 1200L) {
-                bucket.targetCompletedCount++
+                hourlyBuckets[startHour].targetCompletedCount++
             }
         }
 
@@ -281,15 +288,14 @@ class AdvancedAnalyticsEngine(
 
         // Confidence evaluation
         val confidence = when {
-            validSessions.size >= 15 && distinctDays >= 7 -> RecommendationConfidence.HIGH
-            validSessions.size >= 5 && distinctDays >= 3 -> RecommendationConfidence.MODERATE
+            validSessions.isEmpty() -> RecommendationConfidence.LOW
+            validSessions.size >= 10 && distinctDays >= 3 -> RecommendationConfidence.HIGH
+            validSessions.size >= 5 && distinctDays >= 2 -> RecommendationConfidence.MODERATE
             else -> RecommendationConfidence.LOW
         }
 
-        if (confidence == RecommendationConfidence.LOW) {
-            return BestFocusPeriodRecommendation.EMPTY.copy(
-                explanation = "Recorded ${validSessions.size} sessions across $distinctDays days. Need at least 5 sessions across 3 days for reliable recommendations."
-            )
+        if (validSessions.isEmpty()) {
+            return BestFocusPeriodRecommendation.EMPTY
         }
 
         val hourlyList = calculateHourlyProductivity(validSessions)
@@ -300,9 +306,9 @@ class AdvancedAnalyticsEngine(
         var bestTwoHourScore = -1.0
         var bestTwoHourFocusMins = 0
 
-        for (h in 5..22) {
+        for (h in 0..23) {
             val h1 = hourlyList[h]
-            val h2 = hourlyList[h + 1]
+            val h2 = hourlyList[(h + 1) % 24]
             val totalMins = h1.totalFocusedMinutes + h2.totalFocusedMinutes
             val distractionMins = h1.averageDistractionMinutes + h2.averageDistractionMinutes
             val score = totalMins - (distractionMins * 1.5)
@@ -334,7 +340,12 @@ class AdvancedAnalyticsEngine(
         val endFmt = formatHourOfDay(bestTwoHourStart + 2)
         val windowFmt = "$startFmt – $endFmt"
 
-        val explanation = "Based on $distinctDays days of activity, you complete $percentageInWindow% of your deepest work between $windowFmt with fewer interruptions."
+        val explanation = when (confidence) {
+            RecommendationConfidence.LOW ->
+                "Recorded ${validSessions.size} session(s) across $distinctDays day(s). Preliminary peak window identified at $windowFmt. Complete more sessions across different days for higher confidence recommendations."
+            else ->
+                "Based on $distinctDays days of activity, you complete $percentageInWindow% of your deepest work between $windowFmt with fewer interruptions."
+        }
 
         return BestFocusPeriodRecommendation(
             bestHour = bestHourItem.hour,
@@ -406,6 +417,8 @@ class AdvancedAnalyticsEngine(
             }
         }
 
+        val rankedApps = FocusAnalyticsEngine().computeAppStats(usages)
+
         return DistractionDashboardData(
             totalDistractionSeconds = totalDistractionSecs,
             totalDistractionsCount = distractionCount,
@@ -416,7 +429,8 @@ class AdvancedAnalyticsEngine(
             distractionPercentage = distractionPct,
             previousPeriodSeconds = if (previousSessions.isNotEmpty()) prevDistractionSecs else null,
             periodChangePercentage = periodChange,
-            isImprovement = isImprovement
+            isImprovement = isImprovement,
+            rankedApps = rankedApps
         )
     }
 
@@ -745,5 +759,125 @@ class AdvancedAnalyticsEngine(
         var sessionCount: Int = 0,
         var distractionMinutes: Int = 0
     )
+
+    companion object {
+        fun filterSessionsByDate(
+            sessions: List<FocusSessionEntity>,
+            filter: AnalyticsDateFilter,
+            zoneId: ZoneId = ZoneId.systemDefault()
+        ): List<FocusSessionEntity> {
+            val today = LocalDate.now(zoneId)
+            return when (filter) {
+                AnalyticsDateFilter.ALL -> sessions
+                AnalyticsDateFilter.TODAY -> sessions.filter {
+                    Instant.ofEpochMilli(it.startTimestamp).atZone(zoneId).toLocalDate() == today
+                }
+                AnalyticsDateFilter.YESTERDAY -> sessions.filter {
+                    Instant.ofEpochMilli(it.startTimestamp).atZone(zoneId).toLocalDate() == today.minusDays(1)
+                }
+                AnalyticsDateFilter.LAST_7_DAYS -> sessions.filter {
+                    val d = Instant.ofEpochMilli(it.startTimestamp).atZone(zoneId).toLocalDate()
+                    !d.isBefore(today.minusDays(7))
+                }
+                AnalyticsDateFilter.LAST_30_DAYS -> sessions.filter {
+                    val d = Instant.ofEpochMilli(it.startTimestamp).atZone(zoneId).toLocalDate()
+                    !d.isBefore(today.minusDays(30))
+                }
+                AnalyticsDateFilter.THIS_MONTH -> sessions.filter {
+                    val d = Instant.ofEpochMilli(it.startTimestamp).atZone(zoneId).toLocalDate()
+                    d.year == today.year && d.month == today.month
+                }
+            }
+        }
+
+        fun filterUsagesByDate(
+            usages: List<FocusAppUsageEntity>,
+            filter: AnalyticsDateFilter,
+            zoneId: ZoneId = ZoneId.systemDefault()
+        ): List<FocusAppUsageEntity> {
+            val today = LocalDate.now(zoneId)
+            return when (filter) {
+                AnalyticsDateFilter.ALL -> usages
+                AnalyticsDateFilter.TODAY -> usages.filter {
+                    Instant.ofEpochMilli(it.startTimestamp).atZone(zoneId).toLocalDate() == today
+                }
+                AnalyticsDateFilter.YESTERDAY -> usages.filter {
+                    Instant.ofEpochMilli(it.startTimestamp).atZone(zoneId).toLocalDate() == today.minusDays(1)
+                }
+                AnalyticsDateFilter.LAST_7_DAYS -> usages.filter {
+                    val d = Instant.ofEpochMilli(it.startTimestamp).atZone(zoneId).toLocalDate()
+                    !d.isBefore(today.minusDays(7))
+                }
+                AnalyticsDateFilter.LAST_30_DAYS -> usages.filter {
+                    val d = Instant.ofEpochMilli(it.startTimestamp).atZone(zoneId).toLocalDate()
+                    !d.isBefore(today.minusDays(30))
+                }
+                AnalyticsDateFilter.THIS_MONTH -> usages.filter {
+                    val d = Instant.ofEpochMilli(it.startTimestamp).atZone(zoneId).toLocalDate()
+                    d.year == today.year && d.month == today.month
+                }
+            }
+        }
+
+        fun getPreviousPeriodSessions(
+            sessions: List<FocusSessionEntity>,
+            filter: AnalyticsDateFilter,
+            zoneId: ZoneId = ZoneId.systemDefault()
+        ): List<FocusSessionEntity> {
+            val today = LocalDate.now(zoneId)
+            return when (filter) {
+                AnalyticsDateFilter.TODAY -> sessions.filter {
+                    Instant.ofEpochMilli(it.startTimestamp).atZone(zoneId).toLocalDate() == today.minusDays(1)
+                }
+                AnalyticsDateFilter.YESTERDAY -> sessions.filter {
+                    Instant.ofEpochMilli(it.startTimestamp).atZone(zoneId).toLocalDate() == today.minusDays(2)
+                }
+                AnalyticsDateFilter.LAST_7_DAYS -> sessions.filter {
+                    val d = Instant.ofEpochMilli(it.startTimestamp).atZone(zoneId).toLocalDate()
+                    d.isBefore(today.minusDays(7)) && !d.isBefore(today.minusDays(14))
+                }
+                AnalyticsDateFilter.LAST_30_DAYS -> sessions.filter {
+                    val d = Instant.ofEpochMilli(it.startTimestamp).atZone(zoneId).toLocalDate()
+                    d.isBefore(today.minusDays(30)) && !d.isBefore(today.minusDays(60))
+                }
+                AnalyticsDateFilter.THIS_MONTH -> sessions.filter {
+                    val d = Instant.ofEpochMilli(it.startTimestamp).atZone(zoneId).toLocalDate()
+                    val lastMonth = today.minusMonths(1)
+                    d.year == lastMonth.year && d.month == lastMonth.month
+                }
+                AnalyticsDateFilter.ALL -> emptyList()
+            }
+        }
+
+        fun getPreviousPeriodUsages(
+            usages: List<FocusAppUsageEntity>,
+            filter: AnalyticsDateFilter,
+            zoneId: ZoneId = ZoneId.systemDefault()
+        ): List<FocusAppUsageEntity> {
+            val today = LocalDate.now(zoneId)
+            return when (filter) {
+                AnalyticsDateFilter.TODAY -> usages.filter {
+                    Instant.ofEpochMilli(it.startTimestamp).atZone(zoneId).toLocalDate() == today.minusDays(1)
+                }
+                AnalyticsDateFilter.YESTERDAY -> usages.filter {
+                    Instant.ofEpochMilli(it.startTimestamp).atZone(zoneId).toLocalDate() == today.minusDays(2)
+                }
+                AnalyticsDateFilter.LAST_7_DAYS -> usages.filter {
+                    val d = Instant.ofEpochMilli(it.startTimestamp).atZone(zoneId).toLocalDate()
+                    d.isBefore(today.minusDays(7)) && !d.isBefore(today.minusDays(14))
+                }
+                AnalyticsDateFilter.LAST_30_DAYS -> usages.filter {
+                    val d = Instant.ofEpochMilli(it.startTimestamp).atZone(zoneId).toLocalDate()
+                    d.isBefore(today.minusDays(30)) && !d.isBefore(today.minusDays(60))
+                }
+                AnalyticsDateFilter.THIS_MONTH -> usages.filter {
+                    val d = Instant.ofEpochMilli(it.startTimestamp).atZone(zoneId).toLocalDate()
+                    val lastMonth = today.minusMonths(1)
+                    d.year == lastMonth.year && d.month == lastMonth.month
+                }
+                AnalyticsDateFilter.ALL -> emptyList()
+            }
+        }
+    }
 }
 
