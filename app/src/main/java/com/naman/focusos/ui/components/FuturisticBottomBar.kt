@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Settings
@@ -41,6 +42,7 @@ import com.naman.focusos.ui.theme.FocusTheme
 enum class FocusScreen(val title: String, val icon: ImageVector) {
     TODAY("Today", Icons.Default.CheckCircle),
     CALENDAR("Calendar", Icons.Default.CalendarMonth),
+    FOCUS("Focus", Icons.Default.HourglassEmpty),
     ROUTINES("Routines", Icons.Default.Repeat),
     ANALYTICS("Analytics", Icons.Default.Insights),
     SETTINGS("Settings", Icons.Default.Settings)
@@ -55,11 +57,11 @@ fun FuturisticBottomBar(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .padding(horizontal = 14.dp, vertical = 10.dp)
             .clip(RoundedCornerShape(24.dp))
             .background(FocusTheme.colors.surface.copy(alpha = 0.95f))
             .border(1.dp, FocusTheme.colors.border, RoundedCornerShape(24.dp))
-            .padding(vertical = 8.dp, horizontal = 12.dp)
+            .padding(vertical = 6.dp, horizontal = 8.dp)
     ) {
         Row(
             horizontalArrangement = Arrangement.SpaceAround,
@@ -86,14 +88,14 @@ fun FuturisticBottomBar(
                     modifier = Modifier
                         .clip(RoundedCornerShape(12.dp))
                         .clickable { onScreenSelected(screen) }
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                        .padding(horizontal = 6.dp, vertical = 4.dp)
                 ) {
                     Icon(
                         imageVector = screen.icon,
                         contentDescription = screen.title,
                         tint = iconColor,
                         modifier = Modifier
-                            .size(24.dp)
+                            .size(22.dp)
                             .scale(scale)
                     )
 
@@ -104,7 +106,7 @@ fun FuturisticBottomBar(
                         style = MaterialTheme.typography.labelSmall.copy(
                             color = iconColor,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            fontSize = 10.sp
+                            fontSize = 9.5.sp
                         )
                     )
 

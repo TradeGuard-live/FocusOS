@@ -1,0 +1,212 @@
+package com.naman.focusos.domain.focus
+
+import android.app.AppOpsManager
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Process
+import android.provider.Settings
+import com.naman.focusos.data.model.AppClassification
+import com.naman.focusos.data.model.FocusAppUsageEntity
+import com.naman.focusos.data.model.SessionEventType
+import com.naman.focusos.data.model.SessionStatus
+
+data class RawUsageInterval(
+    val packageName: String,
+    val applicationName: String,
+    val startTimestamp: Long,
+    val endTimestamp: Long,
+    val durationSeconds: Long
+)
+
+interface AppUsageProvider {
+    fun hasPermission(): Boolean
+    fun queryEvents(startTime: Long, endTime: Long): List<RawUsageInterval>
+    fun getApplicationLabel(packageName: String): String
+}
+
+class AndroidAppUsageProvider(private val context: Context) : AppUsageProvider {
+
+    private val packageManager: PackageManager = context.packageManager
+    private val appOpsManager = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager
+    private val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
+
+    override fun hasPermission(): Boolean {
+        if (appOpsManager == null) return false
+        val mode = try {
+            appOpsManager.checkOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                Process.myUid(),
+                context.packageName
+            )
+        } catch (e: Exception) {
+            AppOpsManager.MODE_DEFAULT
+        }
+        return mode == AppOpsManager.MODE_ALLOWED
+    }
+
+    override fun getApplicationLabel(packageName: String): String {
+        return try {
+            val appInfo = packageManager.getApplicationInfo(packageName, 0)
+            packageManager.getApplicationLabel(appInfo).toString()
+        } catch (e: Exception) {
+            packageName.substringAfterLast('.')
+        }
+    }
+
+    override fun queryEvents(startTime: Long, endTime: Long): List<RawUsageInterval> {
+        if (!hasPermission() || usageStatsManager == null || startTime >= endTime) {
+            return emptyList()
+        }
+
+        val intervals = mutableListOf<RawUsageInterval>()
+        try {
+            val events = usageStatsManager.queryEvents(startTime, endTime)
+            val event = UsageEvents.Event()
+
+            var currentPkg: String? = null
+            var currentStart: Long = startTime
+
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event)
+                val eventTime = event.timeStamp
+                val pkg = event.packageName ?: continue
+
+                when (event.eventType) {
+                    UsageEvents.Event.ACTIVITY_RESUMED -> {
+                        if (currentPkg != null && currentPkg != pkg) {
+                            val duration = (eventTime - currentStart) / 1000
+                            if (duration > 0) {
+                                intervals.add(
+                                    RawUsageInterval(
+                                        packageName = currentPkg,
+                                        applicationName = getApplicationLabel(currentPkg),
+                                        startTimestamp = currentStart,
+                                        endTimestamp = eventTime,
+                                        durationSeconds = duration
+                                    )
+                                )
+                            }
+                        }
+                        currentPkg = pkg
+                        currentStart = eventTime
+                    }
+                    UsageEvents.Event.ACTIVITY_PAUSED,
+                    UsageEvents.Event.ACTIVITY_STOPPED -> {
+                        if (currentPkg == pkg) {
+                            val duration = (eventTime - currentStart) / 1000
+                            if (duration > 0) {
+                                intervals.add(
+                                    RawUsageInterval(
+                                        packageName = currentPkg,
+                                        applicationName = getApplicationLabel(currentPkg),
+                                        startTimestamp = currentStart,
+                                        endTimestamp = eventTime,
+                                        durationSeconds = duration
+                                    )
+                                )
+                            }
+                            currentPkg = null
+                        }
+                    }
+                }
+            }
+
+            // Close trailing interval up to endTime if still foregrounded
+            if (currentPkg != null) {
+                val duration = (endTime - currentStart) / 1000
+                if (duration > 0) {
+                    intervals.add(
+                        RawUsageInterval(
+                            packageName = currentPkg,
+                            applicationName = getApplicationLabel(currentPkg),
+                            startTimestamp = currentStart,
+                            endTimestamp = endTime,
+                            durationSeconds = duration
+                        )
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            // Android platform security or internal exception: return collected intervals
+        }
+
+        return intervals
+    }
+
+    companion object {
+        fun createUsageAccessIntent(): Intent {
+            return Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+        }
+    }
+}
+
+class AppUsageMonitor(
+    private val provider: AppUsageProvider,
+    private val ourPackageName: String = "com.naman.focusos"
+) {
+
+    fun hasUsagePermission(): Boolean = provider.hasPermission()
+
+    /**
+     * Inspects raw usage events during a session checkpoint window and classifies them.
+     * Distinguishes:
+     * - ACTIVE session distraction: usage outside Focus OS while status == ACTIVE
+     * - PAUSED session usage: usage outside Focus OS while status == PAUSED
+     */
+    fun processUsageWindow(
+        sessionId: Long,
+        windowStart: Long,
+        windowEnd: Long,
+        sessionState: SessionStatus,
+        knownClassifications: Map<String, AppClassification>
+    ): List<FocusAppUsageEntity> {
+        if (!provider.hasPermission() || windowStart >= windowEnd) {
+            return emptyList()
+        }
+
+        val rawIntervals = provider.queryEvents(windowStart, windowEnd)
+        val result = mutableListOf<FocusAppUsageEntity>()
+
+        for (interval in rawIntervals) {
+            // Focus OS foreground is not a distraction
+            if (interval.packageName == ourPackageName) continue
+
+            val configured = knownClassifications[interval.packageName]
+            val classification = when {
+                sessionState == SessionStatus.PAUSED -> AppClassification.PAUSED_SESSION_USAGE
+                configured != null -> configured
+                isSystemPackage(interval.packageName) -> AppClassification.SYSTEM_APP
+                else -> AppClassification.DISTRACTING_APP
+            }
+
+            result.add(
+                FocusAppUsageEntity(
+                    sessionId = sessionId,
+                    packageName = interval.packageName,
+                    applicationName = interval.applicationName,
+                    classification = classification,
+                    startTimestamp = interval.startTimestamp,
+                    endTimestamp = interval.endTimestamp,
+                    durationSeconds = interval.durationSeconds,
+                    sessionState = if (sessionState == SessionStatus.PAUSED) "PAUSED" else "ACTIVE",
+                    monitoringConfidence = "HIGH"
+                )
+            )
+        }
+
+        return result
+    }
+
+    private fun isSystemPackage(packageName: String): Boolean {
+        return packageName.startsWith("android") ||
+                packageName.startsWith("com.android.") ||
+                packageName.startsWith("com.google.android.inputmethod") ||
+                packageName.contains("systemui") ||
+                packageName.contains("launcher")
+    }
+}

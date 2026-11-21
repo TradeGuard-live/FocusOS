@@ -19,13 +19,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
@@ -34,14 +39,19 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.naman.focusos.domain.focus.AndroidAppUsageProvider
 import com.naman.focusos.ui.components.FocusCard
 import com.naman.focusos.ui.components.switchColors
 import com.naman.focusos.ui.theme.FocusTheme
@@ -53,6 +63,8 @@ fun SettingsScreen(
 ) {
     val settings by viewModel.settings.collectAsState()
     val statusMsg by viewModel.statusMessage.collectAsState()
+    val classifications by viewModel.classifications.collectAsState()
+    var showClassificationDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         containerColor = FocusTheme.colors.background,
@@ -277,10 +289,117 @@ fun SettingsScreen(
                 }
             }
 
+            // 5. Focus Work & Distraction Monitoring
+            item {
+                SettingsSection(title = "FOCUS WORK & MONITORING", icon = Icons.Default.HourglassEmpty) {
+                    val hasUsage = viewModel.hasUsagePermission()
+
+                    SettingSwitchRow(
+                        title = "Distraction Monitoring",
+                        subtitle = "Track external app switches during focus sessions",
+                        checked = settings.focusMonitoringEnabled,
+                        onCheckedChange = { viewModel.setFocusMonitoringEnabled(it) }
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Permission status & grant button
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(FocusTheme.colors.surfaceVariant)
+                            .padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Usage Access Permission",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = FocusTheme.colors.textPrimary
+                                )
+                            )
+                            Text(
+                                text = if (hasUsage) "Granted (Full distraction tracking active)" else "Not granted (App switches cannot be tracked)",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = if (hasUsage) FocusTheme.colors.success else FocusTheme.colors.warning,
+                                    fontSize = 11.sp
+                                )
+                            )
+                        }
+
+                        if (!hasUsage) {
+                            val context = LocalContext.current
+                            Button(
+                                onClick = {
+                                    try {
+                                        context.startActivity(AndroidAppUsageProvider.createUsageAccessIntent())
+                                    } catch (e: Exception) {}
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = FocusTheme.colors.warning,
+                                    contentColor = FocusTheme.colors.onWarning
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Text("Grant", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    SettingOptionSelector(
+                        title = "Default Focus Duration",
+                        options = listOf(15 to "15m", 25 to "25m", 30 to "30m", 45 to "45m", 60 to "60m"),
+                        selected = settings.focusDefaultDurationMinutes,
+                        onSelect = { viewModel.setFocusDefaultDuration(it) }
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    SettingOptionSelector(
+                        title = "Daily Focus Goal",
+                        options = listOf(60 to "1h", 120 to "2h", 180 to "3h", 240 to "4h"),
+                        selected = settings.focusDailyGoalMinutes,
+                        onSelect = { viewModel.setFocusDailyGoal(it) }
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedButton(
+                        onClick = { showClassificationDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Category,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Configure App Categories", fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+
             item {
                 Spacer(modifier = Modifier.height(80.dp))
             }
         }
+    }
+
+    if (showClassificationDialog) {
+        AppClassificationDialog(
+            classifications = classifications,
+            onUpdateClassification = { pkg, name, classification ->
+                viewModel.updateClassification(pkg, name, classification)
+            },
+            onDismiss = { showClassificationDialog = false }
+        )
     }
 }
 

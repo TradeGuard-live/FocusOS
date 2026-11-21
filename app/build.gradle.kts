@@ -22,16 +22,44 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            val keystorePath = project.findProperty("FOCUS_RELEASE_KEYSTORE") as? String
+                ?: System.getenv("FOCUS_RELEASE_KEYSTORE")
+            val keystorePassword = project.findProperty("FOCUS_RELEASE_KEYSTORE_PASSWORD") as? String
+                ?: System.getenv("FOCUS_RELEASE_KEYSTORE_PASSWORD")
+            val keyAlias = project.findProperty("FOCUS_RELEASE_KEY_ALIAS") as? String
+                ?: System.getenv("FOCUS_RELEASE_KEY_ALIAS")
+            val keyPassword = project.findProperty("FOCUS_RELEASE_KEY_PASSWORD") as? String
+                ?: System.getenv("FOCUS_RELEASE_KEY_PASSWORD")
+
+            if (keystorePath != null && file(keystorePath).exists()) {
+                storeFile = file(keystorePath)
+                storePassword = keystorePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            isDebuggable = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            val releaseSigning = signingConfigs.getByName("release")
+            signingConfig = if (releaseSigning.storeFile != null && releaseSigning.storeFile!!.exists()) {
+                releaseSigning
+            } else {
+                null
+            }
         }
         debug {
+            isDebuggable = true
             applicationIdSuffix = ""
         }
     }

@@ -23,7 +23,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val taskId = intent.getLongExtra(EXTRA_TASK_ID, -1L)
-        if (taskId == -1L) return
+        if (taskId <= 0L) return
 
         val notificationManager = FocusNotificationManager(context)
 
@@ -60,9 +60,10 @@ class NotificationActionReceiver : BroadcastReceiver() {
                     putExtra(TaskAlarmReceiver.EXTRA_ALARM_TYPE, "SNOOZE")
                 }
 
+                val snoozeRequestCode = ((taskId xor (taskId ushr 32)).toInt() and 0x00FFFFFF) * 100 + 99
                 val pendingIntent = PendingIntent.getBroadcast(
                     context,
-                    (taskId * 100 + 99).toInt(),
+                    snoozeRequestCode,
                     alarmIntent,
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )

@@ -23,7 +23,13 @@ data class UserSettings(
     val soundEnabled: Boolean = true,
     val vibrationEnabled: Boolean = true,
     val hasCompletedOnboarding: Boolean = false,
-    val timezone: String = "Asia/Kolkata"
+    val timezone: String = "Asia/Kolkata",
+    // Focus Work specific settings
+    val focusMonitoringEnabled: Boolean = true,
+    val focusNotificationsEnabled: Boolean = true,
+    val focusDefaultDurationMinutes: Int = 25,
+    val focusDailyGoalMinutes: Int = 120,
+    val focusAutoStartNextSession: Boolean = false
 )
 
 class UserPreferencesManager(private val context: Context) {
@@ -39,6 +45,12 @@ class UserPreferencesManager(private val context: Context) {
         val VIBRATION_ENABLED = booleanPreferencesKey("vibration_enabled")
         val HAS_COMPLETED_ONBOARDING = booleanPreferencesKey("has_completed_onboarding")
         val TIMEZONE = stringPreferencesKey("timezone")
+        // Focus Work keys
+        val FOCUS_MONITORING_ENABLED = booleanPreferencesKey("focus_monitoring_enabled")
+        val FOCUS_NOTIFICATIONS_ENABLED = booleanPreferencesKey("focus_notifications_enabled")
+        val FOCUS_DEFAULT_DURATION = intPreferencesKey("focus_default_duration")
+        val FOCUS_DAILY_GOAL = intPreferencesKey("focus_daily_goal")
+        val FOCUS_AUTO_START_NEXT = booleanPreferencesKey("focus_auto_start_next")
     }
 
     val userSettingsFlow: Flow<UserSettings> = context.dataStore.data.map { prefs ->
@@ -52,7 +64,12 @@ class UserPreferencesManager(private val context: Context) {
             soundEnabled = prefs[Keys.SOUND_ENABLED] ?: true,
             vibrationEnabled = prefs[Keys.VIBRATION_ENABLED] ?: true,
             hasCompletedOnboarding = prefs[Keys.HAS_COMPLETED_ONBOARDING] ?: false,
-            timezone = prefs[Keys.TIMEZONE] ?: "Asia/Kolkata"
+            timezone = prefs[Keys.TIMEZONE] ?: "Asia/Kolkata",
+            focusMonitoringEnabled = prefs[Keys.FOCUS_MONITORING_ENABLED] ?: true,
+            focusNotificationsEnabled = prefs[Keys.FOCUS_NOTIFICATIONS_ENABLED] ?: true,
+            focusDefaultDurationMinutes = prefs[Keys.FOCUS_DEFAULT_DURATION] ?: 25,
+            focusDailyGoalMinutes = prefs[Keys.FOCUS_DAILY_GOAL] ?: 120,
+            focusAutoStartNextSession = prefs[Keys.FOCUS_AUTO_START_NEXT] ?: false
         )
     }
 
@@ -90,6 +107,26 @@ class UserPreferencesManager(private val context: Context) {
 
     suspend fun setCompletedOnboarding(completed: Boolean) {
         context.dataStore.edit { it[Keys.HAS_COMPLETED_ONBOARDING] = completed }
+    }
+
+    suspend fun setFocusMonitoringEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.FOCUS_MONITORING_ENABLED] = enabled }
+    }
+
+    suspend fun setFocusNotificationsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.FOCUS_NOTIFICATIONS_ENABLED] = enabled }
+    }
+
+    suspend fun setFocusDefaultDuration(minutes: Int) {
+        context.dataStore.edit { it[Keys.FOCUS_DEFAULT_DURATION] = minutes }
+    }
+
+    suspend fun setFocusDailyGoal(minutes: Int) {
+        context.dataStore.edit { it[Keys.FOCUS_DAILY_GOAL] = minutes }
+    }
+
+    suspend fun setFocusAutoStartNextSession(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.FOCUS_AUTO_START_NEXT] = enabled }
     }
 
     suspend fun resetAllPreferences() {

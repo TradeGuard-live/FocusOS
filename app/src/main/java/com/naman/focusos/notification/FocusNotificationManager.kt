@@ -62,6 +62,10 @@ class FocusNotificationManager(private val context: Context) {
     ) {
         val channelId = if (isDeadline) CHANNEL_DEADLINES_ID else CHANNEL_REMINDERS_ID
 
+        val safeNotificationId = ((taskId xor (taskId ushr 32)).toInt() and 0x00FFFFFF)
+        val completeRequestCode = safeNotificationId * 100 + 1
+        val snoozeRequestCode = safeNotificationId * 100 + 2
+
         // Tap content intent -> opens MainActivity
         val openAppIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -69,7 +73,7 @@ class FocusNotificationManager(private val context: Context) {
         }
         val openAppPendingIntent = PendingIntent.getActivity(
             context,
-            taskId.toInt(),
+            safeNotificationId,
             openAppIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -81,7 +85,7 @@ class FocusNotificationManager(private val context: Context) {
         }
         val completePendingIntent = PendingIntent.getBroadcast(
             context,
-            (taskId * 100 + 1).toInt(),
+            completeRequestCode,
             completeIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -93,10 +97,18 @@ class FocusNotificationManager(private val context: Context) {
         }
         val snoozePendingIntent = PendingIntent.getBroadcast(
             context,
-            (taskId * 100 + 2).toInt(),
+            snoozeRequestCode,
             snoozeIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+
+        // Public version for lock screen privacy (sanitizes private titles & notes)
+        val publicNotification = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(R.drawable.ic_check_circle)
+            .setContentTitle("Focus OS")
+            .setContentText("Focus task notification")
+            .setColor(0xFF38BDF8.toInt())
+            .build()
 
         val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_check_circle)
@@ -104,16 +116,19 @@ class FocusNotificationManager(private val context: Context) {
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(publicNotification)
             .setAutoCancel(true)
             .setColor(0xFF38BDF8.toInt())
             .setContentIntent(openAppPendingIntent)
             .addAction(R.drawable.ic_check_circle, "Complete", completePendingIntent)
             .addAction(R.drawable.ic_circle_outline, "Snooze 10m", snoozePendingIntent)
 
-        notificationManager.notify(taskId.toInt(), builder.build())
+        notificationManager.notify(safeNotificationId, builder.build())
     }
 
     fun cancelNotification(taskId: Long) {
-        notificationManager.cancel(taskId.toInt())
+        val safeNotificationId = ((taskId xor (taskId ushr 32)).toInt() and 0x00FFFFFF)
+        notificationManager.cancel(safeNotificationId)
     }
 }

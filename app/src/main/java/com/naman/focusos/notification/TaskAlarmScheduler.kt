@@ -15,6 +15,13 @@ import java.time.format.DateTimeFormatter
 
 class TaskAlarmScheduler(private val context: Context) {
 
+    companion object {
+        fun getRequestCode(taskId: Long, offset: Int): Int {
+            val hash = (taskId xor (taskId ushr 32)).toInt() and 0x07FFFFFF
+            return hash * 10 + offset
+        }
+    }
+
     private val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
     private val dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE
     private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
@@ -47,7 +54,7 @@ class TaskAlarmScheduler(private val context: Context) {
                     val reminderTime = startDateTime.minusMinutes(advanceMinutes.toLong())
                     scheduleAlarm(
                         triggerTimeMillis = toEpochMillis(reminderTime),
-                        requestCode = (task.id * 10 + 1).toInt(),
+                        requestCode = getRequestCode(task.id, 1),
                         taskId = task.id,
                         title = "Upcoming: ${task.title}",
                         message = "Starting in $advanceMinutes min at ${task.startTime}",
@@ -58,7 +65,7 @@ class TaskAlarmScheduler(private val context: Context) {
                 // Exact start time
                 scheduleAlarm(
                     triggerTimeMillis = toEpochMillis(startDateTime),
-                    requestCode = (task.id * 10 + 2).toInt(),
+                    requestCode = getRequestCode(task.id, 2),
                     taskId = task.id,
                     title = "Time to Focus: ${task.title}",
                     message = task.description.ifBlank { "Scheduled focus task starting now." },
@@ -79,7 +86,7 @@ class TaskAlarmScheduler(private val context: Context) {
                 val deadlineDateTime = LocalDateTime.of(taskDate, deadlineTime)
                 scheduleAlarm(
                     triggerTimeMillis = toEpochMillis(deadlineDateTime),
-                    requestCode = (task.id * 10 + 3).toInt(),
+                    requestCode = getRequestCode(task.id, 3),
                     taskId = task.id,
                     title = "Deadline Reached: ${task.title}",
                     message = "Task deadline is here! Check off to complete.",
@@ -99,7 +106,7 @@ class TaskAlarmScheduler(private val context: Context) {
                 val dateTime1 = LocalDateTime.of(taskDate, notifTime1)
                 scheduleAlarm(
                     triggerTimeMillis = toEpochMillis(dateTime1),
-                    requestCode = (task.id * 10 + 4).toInt(),
+                    requestCode = getRequestCode(task.id, 4),
                     taskId = task.id,
                     title = "Task Reminder: ${task.title}",
                     message = task.description.ifBlank { "Reminder to work on '${task.title}'." },
@@ -118,7 +125,7 @@ class TaskAlarmScheduler(private val context: Context) {
                 val dateTime2 = LocalDateTime.of(taskDate, notifTime2)
                 scheduleAlarm(
                     triggerTimeMillis = toEpochMillis(dateTime2),
-                    requestCode = (task.id * 10 + 5).toInt(),
+                    requestCode = getRequestCode(task.id, 5),
                     taskId = task.id,
                     title = "2nd Reminder: ${task.title}",
                     message = "Task '${task.title}' is still incomplete! Tap to complete or view.",
@@ -137,7 +144,7 @@ class TaskAlarmScheduler(private val context: Context) {
                 val dateTime3 = LocalDateTime.of(taskDate, notifTime3)
                 scheduleAlarm(
                     triggerTimeMillis = toEpochMillis(dateTime3),
-                    requestCode = (task.id * 10 + 6).toInt(),
+                    requestCode = getRequestCode(task.id, 6),
                     taskId = task.id,
                     title = "Final Reminder: ${task.title}",
                     message = "Final alert: '${task.title}' has not been completed yet today!",
@@ -149,7 +156,7 @@ class TaskAlarmScheduler(private val context: Context) {
 
     fun cancelTaskReminders(taskId: Long) {
         for (suffix in 1..6) {
-            val requestCode = (taskId * 10 + suffix).toInt()
+            val requestCode = getRequestCode(taskId, suffix)
             val intent = Intent(context, TaskAlarmReceiver::class.java)
             val pendingIntent = PendingIntent.getBroadcast(
                 context,

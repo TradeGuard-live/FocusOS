@@ -12,6 +12,7 @@ import com.naman.focusos.R
 import com.naman.focusos.data.db.FocusDatabase
 import com.naman.focusos.data.model.Priority
 import com.naman.focusos.data.model.TaskEntity
+import com.naman.focusos.receiver.WidgetActionReceiver
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -98,10 +99,10 @@ class FocusRemoteViewsFactory(private val context: Context) : RemoteViewsService
             views.setTextColor(R.id.widget_task_title, 0xFFF1F5F9.toInt())
         }
 
-        // Fill-in Intent for Checkbox Click (Directly toggle completion in DB!)
+        // Fill-in Intent for Checkbox Click (Directly toggle completion in DB via secure WidgetActionReceiver)
         val completeFillIn = Intent().apply {
-            action = FocusAppWidgetProvider.ACTION_WIDGET_COMPLETE_TASK
-            putExtra(FocusAppWidgetProvider.EXTRA_TASK_ID, task.id)
+            action = WidgetActionReceiver.ACTION_WIDGET_COMPLETE_TASK
+            putExtra(WidgetActionReceiver.EXTRA_TASK_ID, task.id)
         }
         views.setOnClickFillInIntent(R.id.widget_task_checkbox, completeFillIn)
 

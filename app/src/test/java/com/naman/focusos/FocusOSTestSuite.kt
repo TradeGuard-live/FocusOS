@@ -1,27 +1,45 @@
 package com.naman.focusos
 
-import com.naman.focusos.data.model.HabitCompletionEntity
-import com.naman.focusos.data.preferences.UserSettings
-import com.naman.focusos.ui.theme.DarkFocusColors
-import com.naman.focusos.ui.theme.LavenderFocusColors
-import com.naman.focusos.ui.theme.LightFocusColors
-import com.naman.focusos.ui.theme.MidnightMochiFocusColors
-import com.naman.focusos.ui.theme.PeachyFocusColors
 import androidx.compose.ui.graphics.Color
+import com.naman.focusos.data.model.AppClassification
+import com.naman.focusos.data.model.AppClassificationEntity
+import com.naman.focusos.data.model.FocusAppUsageEntity
+import com.naman.focusos.data.model.FocusPauseEntity
+import com.naman.focusos.data.model.FocusSessionEntity
+import com.naman.focusos.data.model.FocusSessionEventEntity
+import com.naman.focusos.data.model.HabitCompletionEntity
 import com.naman.focusos.data.model.HabitEntity
 import com.naman.focusos.data.model.HabitFrequency
 import com.naman.focusos.data.model.Priority
 import com.naman.focusos.data.model.RecurrenceRuleEntity
 import com.naman.focusos.data.model.RecurrenceType
+import com.naman.focusos.data.model.SessionEventType
+import com.naman.focusos.data.model.SessionStatus
 import com.naman.focusos.data.model.TaskEntity
 import com.naman.focusos.data.model.TaskStatus
 import com.naman.focusos.data.model.TimetableEntryEntity
 import com.naman.focusos.data.model.sortedChronologically
+import com.naman.focusos.data.preferences.UserSettings
 import com.naman.focusos.domain.analytics.ProductivityIntelligenceEngine
 import com.naman.focusos.domain.excel.ExcelManager
 import com.naman.focusos.domain.excel.FullBackupData
+import com.naman.focusos.domain.focus.AppProductivityStat
+import com.naman.focusos.domain.focus.AppUsageMonitor
+import com.naman.focusos.domain.focus.AppUsageProvider
+import com.naman.focusos.domain.focus.DailyFocusStats
+import com.naman.focusos.domain.focus.FocusAnalyticsEngine
+import com.naman.focusos.domain.focus.FocusTimerEngine
+import com.naman.focusos.domain.focus.LiveTimerSnapshot
+import com.naman.focusos.domain.focus.RawUsageInterval
+import com.naman.focusos.domain.focus.WeeklyFocusStats
 import com.naman.focusos.domain.scheduler.HabitSyncEngine
 import com.naman.focusos.domain.scheduler.RecurrenceEngine
+import com.naman.focusos.notification.TaskAlarmScheduler
+import com.naman.focusos.ui.theme.DarkFocusColors
+import com.naman.focusos.ui.theme.LavenderFocusColors
+import com.naman.focusos.ui.theme.LightFocusColors
+import com.naman.focusos.ui.theme.MidnightMochiFocusColors
+import com.naman.focusos.ui.theme.PeachyFocusColors
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -216,7 +234,8 @@ class FocusOSTestSuite {
         )
 
         val tasks = listOf(task3, task1, task2) // Unsorted input
-        val dayStats = ProductivityIntelligenceEngine.calculateDayStats(date, tasks)
+        val now = LocalDateTime.of(date, LocalTime.of(18, 0))
+        val dayStats = ProductivityIntelligenceEngine.calculateDayStats(date, tasks, now)
 
         assertEquals(3, dayStats.totalTasks)
         assertEquals(1, dayStats.completedOnTime)
@@ -1434,5 +1453,509 @@ class FocusOSTestSuite {
             assertNotNull(theme.error)
             assertNotNull(theme.warning)
         }
+    }
+
+    // ==========================================
+    // 9. Application Security & Hardening Tests
+    // ==========================================
+
+    @Test
+    fun testCsvFormulaInjectionSanitization() {
+        val dangerousPayloads = listOf(
+            "=cmd|'/C calc'!A0",
+            "+123456",
+            "-5+5",
+            "@SUM(A1:A10)",
+            "\tTAB_PAYLOAD",
+            "\rRETURN_PAYLOAD"
+        )
+
+        for (payload in dangerousPayloads) {
+            val sanitized = ExcelManager.escapeCsv(payload)
+            // Must be prepended with single quote to neutralize formula execution in Excel/Calc
+            assertTrue("Payload '$payload' must be neutralized with leading single quote", sanitized.startsWith("'") || sanitized.startsWith("\"'"))
+        }
+
+        // Normal strings should not be prepended with single quote
+        val normalString = "Clean Task Title"
+        val escapedNormal = ExcelManager.escapeCsv(normalString)
+        assertEquals("Clean Task Title", escapedNormal)
+    }
+
+    @Test
+    fun testBackupRestoreSecurityInputValidation() {
+        // Construct malformed backup JSON with injection payloads, out-of-range numbers, and huge strings
+        val hugeTitle = "A".repeat(500)
+        val malformedDate = "invalid-date-string"
+        val malformedTime = "99:99"
+        val outOfBoundsDuration = 999999
+        val negativeReminder = -50
+        val outOfBoundsMask = 999
+
+        val json = """
+        {
+            "exportDate": "invalid-export-date",
+            "tasks": [
+                {
+                    "id": 1,
+                    "title": "$hugeTitle",
+                    "description": "Valid description",
+                    "categoryId": 1,
+                    "priority": "HIGH",
+                    "scheduledDate": "$malformedDate",
+                    "startTime": "$malformedTime",
+                    "durationMinutes": $outOfBoundsDuration,
+                    "deadlineTime": "$malformedTime",
+                    "reminderMinutesBefore": $negativeReminder,
+                    "status": "UPCOMING"
+                }
+            ],
+            "habits": [
+                {
+                    "id": 1,
+                    "title": "Habit Title",
+                    "daysOfWeekMask": $outOfBoundsMask,
+                    "targetValue": 50000.0
+                }
+            ],
+            "habitCompletions": [],
+            "timetableEntries": []
+        }
+        """.trimIndent()
+
+        val parsed = ExcelManager.parseFullBackup(ByteArrayInputStream(json.toByteArray(Charsets.UTF_8)))
+        assertEquals(1, parsed.tasks.size)
+        val task = parsed.tasks[0]
+
+        // Title must be clamped to 255 chars
+        assertEquals(255, task.title.length)
+
+        // Invalid date must fallback to a valid YYYY-MM-DD date
+        assertTrue("Scheduled date must match YYYY-MM-DD regex", task.scheduledDate.matches(Regex("""^\d{4}-\d{2}-\d{2}$""")))
+
+        // Invalid times must be nullified
+        assertNull("Invalid start time must be nullified", task.startTime)
+        assertNull("Invalid deadline time must be nullified", task.deadlineTime)
+
+        // Duration must be clamped to max 1440 (24h)
+        assertEquals(1440, task.durationMinutes)
+
+        // Reminder must be clamped to min 0
+        assertEquals(0, task.reminderMinutesBefore)
+
+        // Habit daysOfWeekMask must be clamped to 127
+        assertEquals(1, parsed.habits.size)
+        assertEquals(127, parsed.habits[0].daysOfWeekMask)
+        assertEquals(10000f, parsed.habits[0].targetValue, 0.01f)
+    }
+
+    @Test
+    fun testAlarmSchedulerRequestCodeOverflowSafety() {
+        val largeTaskIds = listOf(
+            Long.MAX_VALUE,
+            Long.MAX_VALUE - 100,
+            5_000_000_000L,
+            2_147_483_647L,
+            1L,
+            100L
+        )
+
+        for (id in largeTaskIds) {
+            for (offset in 1..6) {
+                val code = TaskAlarmScheduler.getRequestCode(id, offset)
+                // Code must be a non-negative 31-bit integer
+                assertTrue("Request code for task $id with offset $offset must be non-negative: $code", code >= 0)
+                assertTrue("Request code must fit safely inside 31-bit integer", code <= Int.MAX_VALUE)
+            }
+        }
+    }
+
+    // =========================================================================
+    // 10. Focus Work & Productivity Intelligence Tests
+    // =========================================================================
+
+    class TestClockProvider(
+        var elapsed: Long = 100_000_000L,
+        var wallTime: Long = 1_700_000_000_000L
+    ) : FocusTimerEngine.ClockProvider {
+        override fun elapsedRealtime(): Long = elapsed
+        override fun currentTimeMillis(): Long = wallTime
+
+        fun advanceSeconds(seconds: Long) {
+            elapsed += seconds * 1000L
+            wallTime += seconds * 1000L
+        }
+    }
+
+    class TestAppUsageProvider(
+        var hasPerm: Boolean = true,
+        var simulatedIntervals: List<RawUsageInterval> = emptyList()
+    ) : AppUsageProvider {
+        override fun hasPermission(): Boolean = hasPerm
+        override fun queryEvents(startTime: Long, endTime: Long): List<RawUsageInterval> = simulatedIntervals
+        override fun getApplicationLabel(packageName: String): String {
+            return when (packageName) {
+                "com.android.chrome" -> "Chrome"
+                "com.google.android.youtube" -> "YouTube"
+                "com.github.android" -> "GitHub"
+                "com.whatsapp" -> "WhatsApp"
+                "com.android.systemui" -> "System UI"
+                else -> packageName.substringAfterLast('.')
+            }
+        }
+    }
+
+    @Test
+    fun testFocusTimerEngineStartOpenEnded() {
+        val clock = TestClockProvider()
+        val engine = FocusTimerEngine(clock)
+
+        engine.start(sessionId = 1L, targetDurationSecs = 0L)
+        val snapshot = engine.getSnapshot()
+
+        assertEquals(1L, snapshot.sessionId)
+        assertEquals(SessionStatus.ACTIVE, snapshot.status)
+        assertEquals(0L, snapshot.targetDurationSeconds)
+        assertEquals(0L, snapshot.focusedSeconds)
+        assertEquals(0.0f, snapshot.progress, 0.001f)
+        assertEquals(100, snapshot.focusCompletionPercentage) // Open-ended defaults to 100%
+    }
+
+    @Test
+    fun testFocusTimerEngineStartTargetDuration() {
+        val clock = TestClockProvider()
+        val engine = FocusTimerEngine(clock)
+
+        engine.start(sessionId = 2L, targetDurationSecs = 1500L) // 25 min
+
+        clock.advanceSeconds(300L) // 5 min passed
+        val snapshot = engine.getSnapshot()
+
+        assertEquals(300L, snapshot.focusedSeconds)
+        assertEquals(1200L, snapshot.remainingSeconds)
+        assertEquals(0.2f, snapshot.progress, 0.01f)
+        assertEquals(20, snapshot.focusCompletionPercentage)
+        assertFalse(snapshot.isTargetCompleted)
+
+        clock.advanceSeconds(1200L) // Finish remaining 20 min
+        val finishedSnapshot = engine.getSnapshot()
+        assertEquals(1500L, finishedSnapshot.focusedSeconds)
+        assertEquals(0L, finishedSnapshot.remainingSeconds)
+        assertEquals(1.0f, finishedSnapshot.progress, 0.01f)
+        assertTrue(finishedSnapshot.isTargetCompleted)
+    }
+
+    @Test
+    fun testFocusTimerEnginePauseAndResumeAccuracy() {
+        val clock = TestClockProvider()
+        val engine = FocusTimerEngine(clock)
+
+        engine.start(sessionId = 3L, targetDurationSecs = 1800L) // 30 min
+
+        // Active for 600s (10 min)
+        clock.advanceSeconds(600L)
+        engine.pause()
+
+        // Paused for 300s (5 min)
+        clock.advanceSeconds(300L)
+        var snapshot = engine.getSnapshot()
+
+        assertEquals(SessionStatus.PAUSED, snapshot.status)
+        assertEquals(600L, snapshot.focusedSeconds) // Paused time NOT counted as focused
+        assertEquals(300L, snapshot.pausedSeconds)
+        assertEquals(900L, snapshot.totalElapsedSeconds)
+
+        // Resume and work for another 300s (5 min)
+        engine.resume()
+        clock.advanceSeconds(300L)
+        engine.stop()
+
+        val finalSnapshot = engine.getSnapshot()
+        assertEquals(SessionStatus.STOPPED, finalSnapshot.status)
+        assertEquals(900L, finalSnapshot.focusedSeconds) // 10m + 5m = 15m
+        assertEquals(300L, finalSnapshot.pausedSeconds)  // 5m paused
+        assertEquals(1200L, finalSnapshot.totalElapsedSeconds) // 20m total elapsed
+    }
+
+    @Test
+    fun testFocusTimerEngineMultiplePauseResumeCycles() {
+        val clock = TestClockProvider()
+        val engine = FocusTimerEngine(clock)
+
+        engine.start(sessionId = 4L, targetDurationSecs = 3600L)
+
+        // Cycle 1: 5m focused, 2m paused
+        clock.advanceSeconds(300L)
+        engine.pause()
+        clock.advanceSeconds(120L)
+        engine.resume()
+
+        // Cycle 2: 10m focused, 3m paused
+        clock.advanceSeconds(600L)
+        engine.pause()
+        clock.advanceSeconds(180L)
+        engine.resume()
+
+        // Final sprint: 5m focused
+        clock.advanceSeconds(300L)
+        engine.complete()
+
+        val snapshot = engine.getSnapshot()
+        assertEquals(SessionStatus.COMPLETED, snapshot.status)
+        assertEquals(1200L, snapshot.focusedSeconds) // 300 + 600 + 300 = 1200s (20 mins)
+        assertEquals(300L, snapshot.pausedSeconds)   // 120 + 180 = 300s (5 mins)
+        assertEquals(1500L, snapshot.totalElapsedSeconds) // 25 mins elapsed
+    }
+
+    @Test
+    fun testFocusTimerEngineRecoveryFromPersistence() {
+        val clock = TestClockProvider()
+        val engine = FocusTimerEngine(clock)
+
+        // Persisted state from DB: 15 min focused, 5 min paused, 1 distraction
+        val savedSession = FocusSessionEntity(
+            id = 42L,
+            title = "Recovered Session",
+            targetDurationSeconds = 1800L,
+            startTimestamp = clock.wallTime - 1200_000L,
+            focusedDurationSeconds = 900L,
+            pausedDurationSeconds = 300L,
+            distractedDurationSeconds = 120L,
+            productiveAppDurationSeconds = 60L,
+            sessionStatus = SessionStatus.ACTIVE,
+            distractionCount = 1,
+            appSwitchCount = 2
+        )
+
+        val pauses = listOf(
+            FocusPauseEntity(
+                id = 1L,
+                sessionId = 42L,
+                pauseTimestamp = clock.wallTime - 600_000L,
+                resumeTimestamp = clock.wallTime - 300_000L,
+                pauseDurationSeconds = 300L
+            )
+        )
+
+        engine.recoverSession(savedSession, pauses, currentWall = clock.wallTime, currentElapsed = clock.elapsed)
+        val snapshot = engine.getSnapshot()
+
+        assertEquals(42L, snapshot.sessionId)
+        assertEquals(SessionStatus.ACTIVE, snapshot.status)
+        assertEquals(900L, snapshot.focusedSeconds)
+        assertEquals(300L, snapshot.pausedSeconds)
+        assertEquals(120L, snapshot.distractedSeconds)
+        assertEquals(1, snapshot.distractionCount)
+        assertEquals(2, snapshot.appSwitchCount)
+
+        // Advance 100 seconds after recovery
+        clock.advanceSeconds(100L)
+        val afterSnapshot = engine.getSnapshot()
+        assertEquals(1000L, afterSnapshot.focusedSeconds)
+    }
+
+    @Test
+    fun testAppUsageMonitorClassification() {
+        val intervals = listOf(
+            RawUsageInterval("com.naman.focusos", "Focus OS", 1000L, 2000L, 1L),
+            RawUsageInterval("com.android.chrome", "Chrome", 2000L, 5000L, 3L),
+            RawUsageInterval("com.google.android.youtube", "YouTube", 5000L, 8000L, 3L),
+            RawUsageInterval("com.github.android", "GitHub", 8000L, 10000L, 2L),
+            RawUsageInterval("com.android.systemui", "System UI", 10000L, 11000L, 1L)
+        )
+
+        val provider = TestAppUsageProvider(hasPerm = true, simulatedIntervals = intervals)
+        val monitor = AppUsageMonitor(provider, ourPackageName = "com.naman.focusos")
+
+        val knownClassifications = mapOf(
+            "com.android.chrome" to AppClassification.NEUTRAL_APP,
+            "com.google.android.youtube" to AppClassification.DISTRACTING_APP,
+            "com.github.android" to AppClassification.PRODUCTIVE_APP
+        )
+
+        val processed = monitor.processUsageWindow(
+            sessionId = 10L,
+            windowStart = 1000L,
+            windowEnd = 11000L,
+            sessionState = SessionStatus.ACTIVE,
+            knownClassifications = knownClassifications
+        )
+
+        // Focus OS itself should be excluded
+        assertEquals(4, processed.size)
+
+        val chrome = processed.find { it.packageName == "com.android.chrome" }
+        assertNotNull(chrome)
+        assertEquals(AppClassification.NEUTRAL_APP, chrome!!.classification)
+        assertEquals("ACTIVE", chrome.sessionState)
+
+        val youtube = processed.find { it.packageName == "com.google.android.youtube" }
+        assertNotNull(youtube)
+        assertEquals(AppClassification.DISTRACTING_APP, youtube!!.classification)
+
+        val github = processed.find { it.packageName == "com.github.android" }
+        assertNotNull(github)
+        assertEquals(AppClassification.PRODUCTIVE_APP, github!!.classification)
+
+        val systemUi = processed.find { it.packageName == "com.android.systemui" }
+        assertNotNull(systemUi)
+        assertEquals(AppClassification.SYSTEM_APP, systemUi!!.classification)
+    }
+
+    @Test
+    fun testAppUsageDuringManualPause() {
+        val intervals = listOf(
+            RawUsageInterval("com.whatsapp", "WhatsApp", 2000L, 5000L, 3L),
+            RawUsageInterval("com.android.chrome", "Chrome", 5000L, 8000L, 3L)
+        )
+
+        val provider = TestAppUsageProvider(hasPerm = true, simulatedIntervals = intervals)
+        val monitor = AppUsageMonitor(provider, ourPackageName = "com.naman.focusos")
+
+        val processed = monitor.processUsageWindow(
+            sessionId = 11L,
+            windowStart = 2000L,
+            windowEnd = 8000L,
+            sessionState = SessionStatus.PAUSED,
+            knownClassifications = emptyMap()
+        )
+
+        assertEquals(2, processed.size)
+        // All usage during manual pause MUST be classified as PAUSED_SESSION_USAGE
+        for (item in processed) {
+            assertEquals(AppClassification.PAUSED_SESSION_USAGE, item.classification)
+            assertEquals("PAUSED", item.sessionState)
+        }
+    }
+
+    @Test
+    fun testAppUsagePermissionRevokedOrUnavailable() {
+        val provider = TestAppUsageProvider(hasPerm = false, simulatedIntervals = listOf(
+            RawUsageInterval("com.google.android.youtube", "YouTube", 1000L, 5000L, 4L)
+        ))
+        val monitor = AppUsageMonitor(provider)
+
+        assertFalse(monitor.hasUsagePermission())
+        val processed = monitor.processUsageWindow(
+            sessionId = 12L,
+            windowStart = 1000L,
+            windowEnd = 5000L,
+            sessionState = SessionStatus.ACTIVE,
+            knownClassifications = emptyMap()
+        )
+
+        // Must return empty and not crash when permission is revoked
+        assertTrue(processed.isEmpty())
+    }
+
+    @Test
+    fun testFocusAnalyticsEngineDailyCalculations() {
+        val analyticsEngine = FocusAnalyticsEngine(zoneId = java.time.ZoneId.of("UTC"))
+        val today = LocalDate.of(2026, 11, 21)
+        val baseMillis = today.atStartOfDay(java.time.ZoneId.of("UTC")).toInstant().toEpochMilli()
+
+        val sessions = listOf(
+            FocusSessionEntity(
+                id = 1L,
+                title = "Morning Code",
+                targetDurationSeconds = 1800L,
+                startTimestamp = baseMillis + 3600_000L * 9, // 09:00
+                focusedDurationSeconds = 1800L,             // 30m
+                pausedDurationSeconds = 300L,               // 5m
+                distractedDurationSeconds = 120L,           // 2m
+                distractionCount = 1,
+                appSwitchCount = 2,
+                sessionStatus = SessionStatus.COMPLETED
+            ),
+            FocusSessionEntity(
+                id = 2L,
+                title = "Afternoon Architecture",
+                targetDurationSeconds = 3600L,
+                startTimestamp = baseMillis + 3600_000L * 14, // 14:00
+                focusedDurationSeconds = 3600L,              // 60m
+                pausedDurationSeconds = 600L,                // 10m
+                distractedDurationSeconds = 240L,            // 4m
+                distractionCount = 2,
+                appSwitchCount = 4,
+                sessionStatus = SessionStatus.COMPLETED
+            )
+        )
+
+        val stats = analyticsEngine.computeDailyStats(sessions, targetDate = today, dailyGoalMinutes = 90)
+
+        assertEquals(90, stats.totalFocusedMinutes) // 30 + 60
+        assertEquals(2, stats.sessionCount)
+        assertEquals(45, stats.averageSessionDurationMinutes) // 90 / 2
+        assertEquals(60, stats.longestSessionMinutes)
+        assertEquals(15, stats.totalPausedMinutes) // 5 + 10
+        assertEquals(6, stats.totalDistractionMinutes) // 2 + 4
+        assertEquals(6, stats.appSwitchCount)
+        assertEquals(100, stats.goalCompletionPercentage) // 90m / 90m = 100%
+    }
+
+    @Test
+    fun testFocusAnalyticsEngineWeeklyCalculations() {
+        val analyticsEngine = FocusAnalyticsEngine(zoneId = java.time.ZoneId.of("UTC"))
+        val monday = LocalDate.of(2026, 11, 16)
+        val baseMillis = monday.atStartOfDay(java.time.ZoneId.of("UTC")).toInstant().toEpochMilli()
+
+        val sessions = listOf(
+            FocusSessionEntity(
+                id = 1L,
+                title = "Mon Session",
+                startTimestamp = baseMillis + 3600_000L * 10,
+                focusedDurationSeconds = 3600L, // 1 hr
+                sessionStatus = SessionStatus.COMPLETED
+            ),
+            FocusSessionEntity(
+                id = 2L,
+                title = "Wed Session",
+                startTimestamp = baseMillis + 86400_000L * 2 + 3600_000L * 10,
+                focusedDurationSeconds = 7200L, // 2 hrs
+                sessionStatus = SessionStatus.COMPLETED
+            )
+        )
+
+        val stats = analyticsEngine.computeWeeklyStats(sessions, weekStartDate = monday)
+
+        assertEquals(3.0f, stats.totalWeeklyHours, 0.01f) // 1h + 2h
+        assertEquals(7, stats.dailyBreakdown.size)
+        assertEquals("Wednesday", stats.bestDayName)
+        assertEquals(2.0f, stats.bestDayHours, 0.01f)
+        assertEquals(28, stats.consistencyPercentage) // 2 out of 7 days = ~28%
+    }
+
+    @Test
+    fun testFocusAnalyticsAppBreakdown() {
+        val analyticsEngine = FocusAnalyticsEngine()
+        val usages = listOf(
+            FocusAppUsageEntity(id = 1, sessionId = 1, packageName = "com.google.android.youtube", applicationName = "YouTube", classification = AppClassification.DISTRACTING_APP, startTimestamp = 1000, endTimestamp = 4000, durationSeconds = 300, sessionState = "ACTIVE"),
+            FocusAppUsageEntity(id = 2, sessionId = 1, packageName = "com.google.android.youtube", applicationName = "YouTube", classification = AppClassification.DISTRACTING_APP, startTimestamp = 5000, endTimestamp = 7000, durationSeconds = 200, sessionState = "ACTIVE"),
+            FocusAppUsageEntity(id = 3, sessionId = 1, packageName = "com.github.android", applicationName = "GitHub", classification = AppClassification.PRODUCTIVE_APP, startTimestamp = 8000, endTimestamp = 10000, durationSeconds = 800, sessionState = "ACTIVE")
+        )
+
+        val appStats = analyticsEngine.computeAppStats(usages)
+
+        assertEquals(2, appStats.size)
+        // GitHub should be first (800s > 500s)
+        assertEquals("com.github.android", appStats[0].packageName)
+        assertEquals(800L, appStats[0].totalDurationSeconds)
+        assertEquals(1, appStats[0].visitCount)
+        assertFalse(appStats[0].isDistraction)
+
+        // YouTube second (500s total, 2 visits)
+        assertEquals("com.google.android.youtube", appStats[1].packageName)
+        assertEquals(500L, appStats[1].totalDurationSeconds)
+        assertEquals(2, appStats[1].visitCount)
+        assertTrue(appStats[1].isDistraction)
+    }
+
+    @Test
+    fun testLiveTimerSnapshotFormatting() {
+        assertEquals("00:45", LiveTimerSnapshot.formatDuration(45L))
+        assertEquals("05:30", LiveTimerSnapshot.formatDuration(330L))
+        assertEquals("01:15:20", LiveTimerSnapshot.formatDuration(4520L))
+        assertEquals("00:00", LiveTimerSnapshot.formatDuration(0L))
+        assertEquals("00:00", LiveTimerSnapshot.formatDuration(-10L))
     }
 }

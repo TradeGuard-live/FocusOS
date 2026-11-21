@@ -1,9 +1,12 @@
 package com.naman.focusos.data.db
 
 import androidx.room.TypeConverter
+import com.naman.focusos.data.model.AppClassification
 import com.naman.focusos.data.model.HabitFrequency
 import com.naman.focusos.data.model.Priority
 import com.naman.focusos.data.model.RecurrenceType
+import com.naman.focusos.data.model.SessionEventType
+import com.naman.focusos.data.model.SessionStatus
 import com.naman.focusos.data.model.TaskStatus
 
 class Converters {
@@ -38,4 +41,22 @@ class Converters {
     } catch (e: Exception) {
         HabitFrequency.DAILY
     }
+
+    @TypeConverter
+    fun fromSessionStatus(status: SessionStatus): String = status.name
+
+    @TypeConverter
+    fun toSessionStatus(value: String): SessionStatus = SessionStatus.fromString(value)
+
+    @TypeConverter
+    fun fromAppClassification(classification: AppClassification): String = classification.name
+
+    @TypeConverter
+    fun toAppClassification(value: String): AppClassification = AppClassification.fromString(value)
+
+    @TypeConverter
+    fun fromSessionEventType(eventType: SessionEventType): String = eventType.name
+
+    @TypeConverter
+    fun toSessionEventType(value: String): SessionEventType = SessionEventType.fromString(value)
 }

@@ -5,6 +5,8 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.naman.focusos.data.db.FocusDatabase
+import com.naman.focusos.data.model.AppClassification
+import com.naman.focusos.data.model.AppClassificationEntity
 import com.naman.focusos.data.model.HabitCompletionEntity
 import com.naman.focusos.data.model.HabitEntity
 import com.naman.focusos.data.model.Priority
@@ -13,8 +15,11 @@ import com.naman.focusos.data.model.TaskStatus
 import com.naman.focusos.data.model.TimetableEntryEntity
 import com.naman.focusos.data.preferences.UserPreferencesManager
 import com.naman.focusos.data.preferences.UserSettings
+import com.naman.focusos.data.repository.FocusSessionRepository
 import com.naman.focusos.domain.excel.ExcelManager
 import com.naman.focusos.domain.excel.FullBackupData
+import com.naman.focusos.domain.focus.AndroidAppUsageProvider
+import com.naman.focusos.domain.focus.AppUsageMonitor
 import com.naman.focusos.widget.FocusAppWidgetProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,6 +39,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     private val prefsManager = UserPreferencesManager(application)
     private val db = FocusDatabase.getInstance(application)
+    private val focusRepo = FocusSessionRepository(application)
+    private val usageMonitor = AppUsageMonitor(AndroidAppUsageProvider(application))
     private val dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE
 
     val settings: StateFlow<UserSettings> = prefsManager.userSettingsFlow.stateIn(
@@ -42,8 +49,43 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         initialValue = UserSettings()
     )
 
+    val classifications: StateFlow<List<AppClassificationEntity>> = focusRepo.getAllClassifications().stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
     private val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
+
+    fun hasUsagePermission(): Boolean = usageMonitor.hasUsagePermission()
+
+    fun setFocusMonitoringEnabled(enabled: Boolean) {
+        viewModelScope.launch { prefsManager.setFocusMonitoringEnabled(enabled) }
+    }
+
+    fun setFocusNotificationsEnabled(enabled: Boolean) {
+        viewModelScope.launch { prefsManager.setFocusNotificationsEnabled(enabled) }
+    }
+
+    fun setFocusDefaultDuration(minutes: Int) {
+        viewModelScope.launch { prefsManager.setFocusDefaultDuration(minutes) }
+    }
+
+    fun setFocusDailyGoal(minutes: Int) {
+        viewModelScope.launch { prefsManager.setFocusDailyGoal(minutes) }
+    }
+
+    fun updateClassification(
+        packageName: String,
+        appName: String,
+        classification: AppClassification,
+        isExcluded: Boolean = false
+    ) {
+        viewModelScope.launch {
+            focusRepo.updateAppClassification(packageName, appName, classification, isExcluded)
+        }
+    }
 
     fun setThemeMode(mode: String) {
         viewModelScope.launch { prefsManager.setThemeMode(mode) }

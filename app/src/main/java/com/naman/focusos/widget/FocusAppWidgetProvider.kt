@@ -13,6 +13,7 @@ import com.naman.focusos.MainActivity
 import com.naman.focusos.R
 import com.naman.focusos.data.db.FocusDatabase
 import com.naman.focusos.domain.analytics.ProductivityIntelligenceEngine
+import com.naman.focusos.receiver.WidgetActionReceiver
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -64,7 +65,7 @@ class FocusAppWidgetProvider : AppWidgetProvider() {
         when (intent.action) {
             ACTION_WIDGET_COMPLETE_TASK -> {
                 val taskId = intent.getLongExtra(EXTRA_TASK_ID, -1L)
-                if (taskId != -1L) {
+                if (taskId > 0L) {
                     val pendingResult = goAsync()
                     CoroutineScope(Dispatchers.IO).launch {
                         try {
@@ -74,7 +75,9 @@ class FocusAppWidgetProvider : AppWidgetProvider() {
                                 val updated = if (task.status.isCompleted()) {
                                     task.markIncomplete()
                                 } else {
-                                    task.markCompleted(LocalDateTime.now())
+                                    val completed = task.markCompleted(LocalDateTime.now())
+                                    com.naman.focusos.notification.TaskAlarmScheduler(context).cancelTaskReminders(taskId)
+                                    completed
                                 }
                                 db.taskDao().updateTask(updated)
                             }
@@ -172,8 +175,8 @@ class FocusAppWidgetProvider : AppWidgetProvider() {
             views.setRemoteAdapter(R.id.widget_task_list, serviceIntent)
             views.setEmptyView(R.id.widget_task_list, R.id.widget_empty_text)
 
-            // PendingIntent template for item actions (e.g. checkbox clicks)
-            val actionIntent = Intent(context, FocusAppWidgetProvider::class.java)
+            // PendingIntent template for item actions targeting unexported WidgetActionReceiver
+            val actionIntent = Intent(context, WidgetActionReceiver::class.java)
             val actionPendingIntent = PendingIntent.getBroadcast(
                 context,
                 appWidgetId,

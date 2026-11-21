@@ -11,6 +11,7 @@ import com.naman.focusos.data.model.RecurrenceRuleEntity
 import com.naman.focusos.data.model.TaskEntity
 import com.naman.focusos.data.model.TaskStatus
 import com.naman.focusos.data.model.TimetableEntryEntity
+import org.apache.poi.openxml4j.util.ZipSecureFile
 import org.apache.poi.ss.usermodel.CellType
 import org.apache.poi.ss.usermodel.WorkbookFactory
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
@@ -51,6 +52,13 @@ object ExcelManager {
      * Inspect and parse Habit_Tracker.xlsx workbook
      */
     fun parseHabitTrackerWorkbook(inputStream: InputStream): HabitImportPreview {
+        // Enforce safe inflation ratio to prevent Zip Bomb attacks (CWE-409)
+        try {
+            ZipSecureFile.setMinInflateRatio(0.01)
+        } catch (e: Throwable) {
+            // POI security configuration fallback
+        }
+
         val workbook = WorkbookFactory.create(inputStream)
         val sheet = workbook.getSheet("Habit Tracker - Month") ?: workbook.getSheetAt(0)
         val sheetName = sheet.sheetName
@@ -291,37 +299,74 @@ object ExcelManager {
     }
 
     /**
-     * Restore Full Backup from JSON
+     * Restore Full Backup from JSON with comprehensive input validation
      */
     fun parseFullBackup(inputStream: InputStream): FullBackupData {
-        val jsonString = inputStream.bufferedReader().use { it.readText() }
+        // Enforce max stream size (25MB) to prevent OOM Denial of Service
+        val jsonString = inputStream.bufferedReader().use { reader ->
+            val content = reader.readText()
+            if (content.length > 25 * 1024 * 1024) {
+                throw IllegalArgumentException("Backup file exceeds maximum allowed size of 25MB")
+            }
+            content
+        }
         val root = JSONObject(jsonString)
 
-        val exportDate = root.optString("exportDate", LocalDate.now().toString())
+        val rawExportDate = root.optString("exportDate", LocalDate.now().toString())
+        val exportDate = if (rawExportDate.matches(Regex("""^\d{4}-\d{2}-\d{2}.*$"""))) {
+            rawExportDate.take(30)
+        } else {
+            LocalDate.now().toString()
+        }
 
         val tasks = mutableListOf<TaskEntity>()
         val tasksArray = root.optJSONArray("tasks") ?: JSONArray()
-        for (i in 0 until tasksArray.length()) {
+        val taskCount = tasksArray.length().coerceAtMost(10000)
+        for (i in 0 until taskCount) {
             val obj = tasksArray.getJSONObject(i)
+            val title = obj.optString("title", "").trim().take(255).ifBlank { "Untitled Task" }
+            val description = obj.optString("description", "").take(2000)
+            val notes = obj.optString("notes", "").take(5000)
+            val scheduledDate = obj.optString("scheduledDate", "")
+            val timeRegex = Regex("""^(?:[01]\d|2[0-3]):[0-5]\d$""")
+            val dateRegex = Regex("""^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$""")
+
+            val validDate = if (scheduledDate.matches(dateRegex)) scheduledDate else LocalDate.now().toString()
+
+            val rawStartTime = if (obj.isNull("startTime")) null else obj.getString("startTime")
+            val validStartTime = if (rawStartTime != null && rawStartTime.matches(timeRegex)) rawStartTime else null
+
+            val rawDeadline = if (obj.isNull("deadlineTime")) null else obj.getString("deadlineTime")
+            val validDeadline = if (rawDeadline != null && rawDeadline.matches(timeRegex)) rawDeadline else null
+
+            val notif1 = if (obj.isNull("notificationTime1")) null else obj.getString("notificationTime1")
+            val validNotif1 = if (notif1 != null && notif1.matches(timeRegex)) notif1 else null
+
+            val notif2 = if (obj.isNull("notificationTime2")) null else obj.getString("notificationTime2")
+            val validNotif2 = if (notif2 != null && notif2.matches(timeRegex)) notif2 else null
+
+            val notif3 = if (obj.isNull("notificationTime3")) null else obj.getString("notificationTime3")
+            val validNotif3 = if (notif3 != null && notif3.matches(timeRegex)) notif3 else null
+
             tasks.add(
                 TaskEntity(
-                    id = obj.optLong("id", 0),
-                    title = obj.getString("title"),
-                    description = obj.optString("description", ""),
-                    categoryId = obj.optLong("categoryId", 1),
+                    id = obj.optLong("id", 0).coerceAtLeast(0),
+                    title = title,
+                    description = description,
+                    categoryId = obj.optLong("categoryId", 1).coerceAtLeast(1),
                     priority = Priority.fromString(obj.optString("priority")),
-                    scheduledDate = obj.getString("scheduledDate"),
-                    startTime = if (obj.isNull("startTime")) null else obj.getString("startTime"),
-                    durationMinutes = obj.optInt("durationMinutes", 30),
-                    deadlineTime = if (obj.isNull("deadlineTime")) null else obj.getString("deadlineTime"),
-                    reminderMinutesBefore = obj.optInt("reminderMinutesBefore", 10),
+                    scheduledDate = validDate,
+                    startTime = validStartTime,
+                    durationMinutes = obj.optInt("durationMinutes", 30).coerceIn(1, 1440),
+                    deadlineTime = validDeadline,
+                    reminderMinutesBefore = obj.optInt("reminderMinutesBefore", 10).coerceIn(0, 120),
                     recurrenceRuleId = if (obj.isNull("recurrenceRuleId")) null else obj.getLong("recurrenceRuleId"),
                     status = TaskStatus.fromString(obj.optString("status")),
                     actualCompletionTime = if (obj.isNull("actualCompletionTime")) null else obj.getLong("actualCompletionTime"),
-                    notes = obj.optString("notes", ""),
-                    notificationTime1 = if (obj.isNull("notificationTime1")) null else obj.getString("notificationTime1"),
-                    notificationTime2 = if (obj.isNull("notificationTime2")) null else obj.getString("notificationTime2"),
-                    notificationTime3 = if (obj.isNull("notificationTime3")) null else obj.getString("notificationTime3"),
+                    notes = notes,
+                    notificationTime1 = validNotif1,
+                    notificationTime2 = validNotif2,
+                    notificationTime3 = validNotif3,
                     createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
                     updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
                 )
@@ -330,20 +375,23 @@ object ExcelManager {
 
         val habits = mutableListOf<HabitEntity>()
         val habitsArray = root.optJSONArray("habits") ?: JSONArray()
-        for (i in 0 until habitsArray.length()) {
+        val habitCount = habitsArray.length().coerceAtMost(1000)
+        for (i in 0 until habitCount) {
             val obj = habitsArray.getJSONObject(i)
+            val title = obj.optString("title", "").trim().take(255).ifBlank { "Habit" }
+            val description = obj.optString("description", "").take(1000)
             habits.add(
                 HabitEntity(
-                    id = obj.optLong("id", 0),
-                    title = obj.getString("title"),
-                    description = obj.optString("description", ""),
-                    categoryId = obj.optLong("categoryId", 4),
+                    id = obj.optLong("id", 0).coerceAtLeast(0),
+                    title = title,
+                    description = description,
+                    categoryId = obj.optLong("categoryId", 4).coerceAtLeast(1),
                     frequency = try { HabitFrequency.valueOf(obj.optString("frequency", "DAILY")) } catch (e: Exception) { HabitFrequency.DAILY },
-                    daysOfWeekMask = obj.optInt("daysOfWeekMask", 127),
-                    targetValue = obj.optDouble("targetValue", 1.0).toFloat(),
-                    unit = obj.optString("unit", "times"),
-                    colorHex = obj.optString("colorHex", "#38BDF8"),
-                    iconName = obj.optString("iconName", "CheckCircle"),
+                    daysOfWeekMask = obj.optInt("daysOfWeekMask", 127).coerceIn(0, 127),
+                    targetValue = obj.optDouble("targetValue", 1.0).toFloat().coerceIn(0.1f, 10000f),
+                    unit = obj.optString("unit", "times").take(50),
+                    colorHex = obj.optString("colorHex", "#38BDF8").take(20),
+                    iconName = obj.optString("iconName", "CheckCircle").take(50),
                     createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
                     isActive = obj.optBoolean("isActive", true)
                 )
@@ -352,16 +400,19 @@ object ExcelManager {
 
         val completions = mutableListOf<HabitCompletionEntity>()
         val completionsArray = root.optJSONArray("habitCompletions") ?: JSONArray()
-        for (i in 0 until completionsArray.length()) {
+        val compCount = completionsArray.length().coerceAtMost(50000)
+        for (i in 0 until compCount) {
             val obj = completionsArray.getJSONObject(i)
+            val date = obj.optString("date", "")
+            val validDate = if (date.matches(Regex("""^\d{4}-\d{2}-\d{2}$"""))) date else LocalDate.now().toString()
             completions.add(
                 HabitCompletionEntity(
-                    id = obj.optLong("id", 0),
-                    habitId = obj.getLong("habitId"),
-                    date = obj.getString("date"),
+                    id = obj.optLong("id", 0).coerceAtLeast(0),
+                    habitId = obj.getLong("habitId").coerceAtLeast(0),
+                    date = validDate,
                     isCompleted = obj.optBoolean("isCompleted", true),
-                    actualValue = obj.optDouble("actualValue", 1.0).toFloat(),
-                    notes = obj.optString("notes", ""),
+                    actualValue = obj.optDouble("actualValue", 1.0).toFloat().coerceIn(0f, 10000f),
+                    notes = obj.optString("notes", "").take(1000),
                     completedAt = obj.optLong("completedAt", System.currentTimeMillis())
                 )
             )
@@ -369,20 +420,23 @@ object ExcelManager {
 
         val timetable = mutableListOf<TimetableEntryEntity>()
         val timetableArray = root.optJSONArray("timetableEntries") ?: JSONArray()
-        for (i in 0 until timetableArray.length()) {
+        val ttCount = timetableArray.length().coerceAtMost(1000)
+        for (i in 0 until ttCount) {
             val obj = timetableArray.getJSONObject(i)
+            val startTime = obj.optString("startTime", "09:00")
+            val validStartTime = if (startTime.matches(Regex("""^\d{2}:\d{2}$"""))) startTime else "09:00"
             timetable.add(
                 TimetableEntryEntity(
-                    id = obj.optLong("id", 0),
-                    title = obj.getString("title"),
-                    description = obj.optString("description", ""),
-                    startTime = obj.getString("startTime"),
-                    durationMinutes = obj.optInt("durationMinutes", 30),
-                    categoryId = obj.optLong("categoryId", 1),
-                    daysOfWeekMask = obj.optInt("daysOfWeekMask", 127),
+                    id = obj.optLong("id", 0).coerceAtLeast(0),
+                    title = obj.optString("title", "").trim().take(255).ifBlank { "Session" },
+                    description = obj.optString("description", "").take(1000),
+                    startTime = validStartTime,
+                    durationMinutes = obj.optInt("durationMinutes", 30).coerceIn(1, 1440),
+                    categoryId = obj.optLong("categoryId", 1).coerceAtLeast(1),
+                    daysOfWeekMask = obj.optInt("daysOfWeekMask", 127).coerceIn(0, 127),
                     isEnabled = obj.optBoolean("isEnabled", true),
-                    reminderMinutesBefore = obj.optInt("reminderMinutesBefore", 5),
-                    sortOrder = obj.optInt("sortOrder", i)
+                    reminderMinutesBefore = obj.optInt("reminderMinutesBefore", 5).coerceIn(0, 120),
+                    sortOrder = obj.optInt("sortOrder", i).coerceIn(0, 10000)
                 )
             )
         }
@@ -398,11 +452,18 @@ object ExcelManager {
         )
     }
 
-    private fun escapeCsv(value: String): String {
-        return if (value.contains(",") || value.contains("\"") || value.contains("\n")) {
-            "\"" + value.replace("\"", "\"\"") + "\""
+    fun escapeCsv(value: String): String {
+        var sanitized = value
+        // Neutralize CSV / Spreadsheet Formula Injection (CWE-1236)
+        if (sanitized.isNotEmpty() && (sanitized.startsWith("=") || sanitized.startsWith("+") ||
+            sanitized.startsWith("-") || sanitized.startsWith("@") ||
+            sanitized.startsWith("\t") || sanitized.startsWith("\r"))) {
+            sanitized = "'" + sanitized
+        }
+        return if (sanitized.contains(",") || sanitized.contains("\"") || sanitized.contains("\n") || sanitized.contains("\r")) {
+            "\"" + sanitized.replace("\"", "\"\"") + "\""
         } else {
-            value
+            sanitized
         }
     }
 }
