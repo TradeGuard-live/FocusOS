@@ -65,6 +65,12 @@ interface FocusSessionDao {
     @Query("SELECT * FROM focus_sessions WHERE linkedTaskId = :taskId ORDER BY startTimestamp DESC")
     suspend fun getSessionsForTaskSync(taskId: Long): List<FocusSessionEntity>
 
+    @Query("UPDATE focus_sessions SET linkedTaskId = NULL WHERE linkedTaskId = :taskId")
+    suspend fun unlinkTaskFromSessions(taskId: Long)
+
+    @Query("UPDATE focus_sessions SET linkedTaskId = NULL WHERE linkedTaskId IN (:taskIds)")
+    suspend fun unlinkTasksFromSessions(taskIds: List<Long>)
+
     // =========================================================================
     // FOCUS PAUSES
     // =========================================================================

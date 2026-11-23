@@ -11,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,6 +31,7 @@ import com.naman.focusos.data.preferences.UserPreferencesManager
 import com.naman.focusos.service.FocusTimerService
 import com.naman.focusos.ui.components.FocusScreen
 import com.naman.focusos.ui.components.FuturisticBottomBar
+import com.naman.focusos.ui.components.SplashScreen
 import com.naman.focusos.ui.screens.analytics.AnalyticsScreen
 import com.naman.focusos.ui.screens.analytics.AnalyticsViewModel
 import com.naman.focusos.ui.screens.calendar.CalendarScreen
@@ -79,7 +81,26 @@ class MainActivity : ComponentActivity() {
             }
 
             FocusOSTheme(themeMode = settings.themeMode) {
-                FocusOSApp(initialNavigateToFocus = navigateToFocusFlow.value)
+                var showSplash by remember {
+                    mutableStateOf(!FocusOSApplication.hasPlayedSplash)
+                }
+
+                Crossfade(
+                    targetState = showSplash,
+                    animationSpec = tween(350),
+                    label = "splash_transition"
+                ) { isSplash ->
+                    if (isSplash) {
+                        SplashScreen(
+                            onAnimationComplete = {
+                                FocusOSApplication.hasPlayedSplash = true
+                                showSplash = false
+                            }
+                        )
+                    } else {
+                        FocusOSApp(initialNavigateToFocus = navigateToFocusFlow.value)
+                    }
+                }
             }
         }
     }

@@ -1,6 +1,7 @@
 package com.naman.focusos.data.repository
 
 import android.content.Context
+import androidx.room.withTransaction
 import com.naman.focusos.data.db.FocusDatabase
 import com.naman.focusos.data.model.HabitCompletionEntity
 import com.naman.focusos.data.model.HabitEntity
@@ -10,6 +11,7 @@ import com.naman.focusos.data.model.RecurrenceType
 import com.naman.focusos.data.model.TaskEntity
 import com.naman.focusos.domain.scheduler.HabitSyncEngine
 import com.naman.focusos.domain.scheduler.RecurrenceEngine
+import com.naman.focusos.notification.FocusNotificationManager
 import com.naman.focusos.notification.TaskAlarmScheduler
 import com.naman.focusos.widget.FocusAppWidgetProvider
 import kotlinx.coroutines.Dispatchers
@@ -25,7 +27,9 @@ class TaskRepository(private val context: Context) {
     private val taskDao = db.taskDao()
     private val habitDao = db.habitDao()
     private val recurrenceDao = db.recurrenceRuleDao()
+    private val focusDao = db.focusSessionDao()
     private val alarmScheduler = TaskAlarmScheduler(context)
+    private val notificationManager = FocusNotificationManager(context)
     private val dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE
 
     fun getTasksForDate(date: String): Flow<List<TaskEntity>> = taskDao.getTasksForDate(date)
@@ -260,26 +264,127 @@ class TaskRepository(private val context: Context) {
     }
 
     suspend fun deleteTask(task: TaskEntity) = withContext(Dispatchers.IO) {
-        taskDao.deleteTask(task)
+        db.withTransaction {
+            focusDao.unlinkTaskFromSessions(task.id)
+            taskDao.deleteTaskById(task.id)
+
+            // If task had a recurrence rule, clean up the rule if no occurrences remain,
+            // or record this date as an exception so recurrence generation won't recreate it.
+            val ruleId = task.recurrenceRuleId
+            if (ruleId != null && ruleId > 0) {
+                val remaining = taskDao.getTasksByRecurrenceRule(ruleId)
+                if (remaining.isEmpty()) {
+                    recurrenceDao.deleteRuleById(ruleId)
+                } else {
+                    val rule = recurrenceDao.getRuleById(ruleId)
+                    if (rule != null) {
+                        val currentExceptions = if (rule.exceptionDates.isBlank()) {
+                            emptyList()
+                        } else {
+                            rule.exceptionDates.split(",").map { it.trim() }
+                        }
+                        if (task.scheduledDate !in currentExceptions) {
+                            val updatedExceptions = (currentExceptions + task.scheduledDate).joinToString(",")
+                            recurrenceDao.updateRule(rule.copy(exceptionDates = updatedExceptions))
+                        }
+                    }
+                }
+            }
+        }
+
         alarmScheduler.cancelTaskReminders(task.id)
+        notificationManager.cancelNotification(task.id)
+
+        // Automatically sync habit state after deletion
+        val habitRepo = HabitRepository(context)
+        habitRepo.syncTasksToHabits(taskDao.getAllTasksSync())
+
+        FocusAppWidgetProvider.sendRefreshBroadcast(context)
+    }
+
+    /**
+     * Permanently deletes a recurring task series from the specified task's scheduledDate forward.
+     * Deletes the original task record and all future occurrences of the recurrence series,
+     * while safely unlinking focus sessions and preserving independent tasks with similar titles.
+     */
+    suspend fun deleteRecurringTaskPermanently(task: TaskEntity) = withContext(Dispatchers.IO) {
+        val ruleId = task.recurrenceRuleId
+        if (ruleId == null || ruleId <= 0) {
+            deleteTask(task)
+            return@withContext
+        }
+
+        val tasksToDelete = taskDao.getFutureTasksByRecurrenceRule(ruleId, task.scheduledDate)
+            .ifEmpty { listOf(task) }
+        val idsToDelete = tasksToDelete.map { it.id }
+
+        db.withTransaction {
+            focusDao.unlinkTasksFromSessions(idsToDelete)
+            taskDao.deleteTasksByIds(idsToDelete)
+
+            val remaining = taskDao.getTasksByRecurrenceRule(ruleId)
+            if (remaining.isEmpty()) {
+                recurrenceDao.deleteRuleById(ruleId)
+            } else {
+                // Update recurrence rule's endDate so future occurrences are not generated
+                val rule = recurrenceDao.getRuleById(ruleId)
+                if (rule != null) {
+                    val prevDay = try {
+                        LocalDate.parse(task.scheduledDate, dateFormatter).minusDays(1).format(dateFormatter)
+                    } catch (e: Exception) {
+                        null
+                    }
+                    if (prevDay != null) {
+                        recurrenceDao.updateRule(rule.copy(endDate = prevDay))
+                    }
+                }
+            }
+        }
+
+        for (t in tasksToDelete) {
+            alarmScheduler.cancelTaskReminders(t.id)
+            notificationManager.cancelNotification(t.id)
+        }
+
+        val habitRepo = HabitRepository(context)
+        habitRepo.syncTasksToHabits(taskDao.getAllTasksSync())
+
         FocusAppWidgetProvider.sendRefreshBroadcast(context)
     }
 
     suspend fun deleteRecurringSeries(ruleId: Long, preserveHistory: Boolean = true) = withContext(Dispatchers.IO) {
-        if (preserveHistory) {
-            // Delete only non-completed future tasks for this rule
-            val todayStr = LocalDate.now().format(dateFormatter)
-            val allForRule = taskDao.getAllTasksSync().filter { it.recurrenceRuleId == ruleId }
-            for (t in allForRule) {
-                if (!t.status.isCompleted() && t.scheduledDate >= todayStr) {
-                    taskDao.deleteTask(t)
-                    alarmScheduler.cancelTaskReminders(t.id)
+        val allForRule = taskDao.getTasksByRecurrenceRule(ruleId)
+        val todayStr = LocalDate.now().format(dateFormatter)
+        val tasksToDelete = if (preserveHistory) {
+            allForRule.filter { !it.status.isCompleted() && it.scheduledDate >= todayStr }
+        } else {
+            allForRule
+        }
+        val idsToDelete = tasksToDelete.map { it.id }
+
+        db.withTransaction {
+            focusDao.unlinkTasksFromSessions(idsToDelete)
+            taskDao.deleteTasksByIds(idsToDelete)
+            val remaining = taskDao.getTasksByRecurrenceRule(ruleId)
+            if (remaining.isEmpty()) {
+                recurrenceDao.deleteRuleById(ruleId)
+            } else if (preserveHistory) {
+                val rule = recurrenceDao.getRuleById(ruleId)
+                if (rule != null) {
+                    val yesterday = LocalDate.now().minusDays(1).format(dateFormatter)
+                    recurrenceDao.updateRule(rule.copy(endDate = yesterday))
                 }
             }
-        } else {
-            taskDao.deleteTasksByRecurrenceRule(ruleId)
         }
-        recurrenceDao.deleteRuleById(ruleId)
+
+        for (t in tasksToDelete) {
+            alarmScheduler.cancelTaskReminders(t.id)
+            notificationManager.cancelNotification(t.id)
+        }
+
+        val habitRepo = HabitRepository(context)
+        habitRepo.syncTasksToHabits(taskDao.getAllTasksSync())
+
         FocusAppWidgetProvider.sendRefreshBroadcast(context)
     }
 }

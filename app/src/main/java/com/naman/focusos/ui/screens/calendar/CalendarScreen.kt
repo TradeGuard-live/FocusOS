@@ -23,10 +23,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,6 +52,7 @@ import com.naman.focusos.ui.components.FocusCard
 import com.naman.focusos.ui.components.MascotPose
 import com.naman.focusos.ui.components.QuickAddTaskSheet
 import com.naman.focusos.ui.components.TaskCard
+import com.naman.focusos.ui.theme.CrimsonCoral
 import com.naman.focusos.ui.theme.ElectricBlue
 import com.naman.focusos.ui.theme.FocusTheme
 import com.naman.focusos.ui.theme.MintEmerald
@@ -66,6 +71,9 @@ fun CalendarScreen(
     val uiState by viewModel.uiState.collectAsState()
     var showAddTaskSheet by remember { mutableStateOf(false) }
     var taskToEdit by remember { mutableStateOf<TaskEntity?>(null) }
+    var taskToDelete by remember { mutableStateOf<TaskEntity?>(null) }
+    var showRecurringChoiceDialog by remember { mutableStateOf(false) }
+    var showPermanentConfirmDialog by remember { mutableStateOf(false) }
 
     val categoryMap = remember(uiState.categories) {
         uiState.categories.associateBy { it.id }
@@ -187,7 +195,15 @@ fun CalendarScreen(
                         categoryColorHex = cat?.colorHex ?: "#38BDF8",
                         onToggleComplete = { viewModel.toggleTaskComplete(task.id) },
                         onEdit = { taskToEdit = task },
-                        onDelete = { viewModel.deleteTask(task) }
+                        onDelete = {
+                            taskToDelete = task
+                            val isRecurring = task.recurrenceRuleId != null && task.recurrenceRuleId > 0
+                            if (isRecurring) {
+                                showRecurringChoiceDialog = true
+                            } else {
+                                showPermanentConfirmDialog = true
+                            }
+                        }
                     )
                 }
             }
@@ -217,6 +233,132 @@ fun CalendarScreen(
                 showAddTaskSheet = false
                 taskToEdit = null
             }
+        )
+    }
+
+    // 1. Recurring Choice Dialog
+    if (showRecurringChoiceDialog && taskToDelete != null) {
+        val task = taskToDelete!!
+        AlertDialog(
+            onDismissRequest = {
+                showRecurringChoiceDialog = false
+                taskToDelete = null
+            },
+            title = {
+                Text(
+                    text = "Delete Recurring Task",
+                    fontWeight = FontWeight.Bold,
+                    color = FocusTheme.colors.textPrimary
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "This task belongs to a recurring routine with multiple scheduled occurrences. Choose an option:",
+                        color = FocusTheme.colors.textSecondary,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Button(
+                        onClick = {
+                            viewModel.deleteTask(task)
+                            showRecurringChoiceDialog = false
+                            taskToDelete = null
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = FocusTheme.colors.surfaceVariant,
+                            contentColor = FocusTheme.colors.textPrimary
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Delete this occurrence only")
+                    }
+                    Button(
+                        onClick = {
+                            showRecurringChoiceDialog = false
+                            showPermanentConfirmDialog = true
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = CrimsonCoral,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Delete entire task permanently", fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        showRecurringChoiceDialog = false
+                        taskToDelete = null
+                    },
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Cancel", color = FocusTheme.colors.textSecondary)
+                }
+            },
+            containerColor = FocusTheme.colors.surface
+        )
+    }
+
+    // 2. Permanent Deletion Confirmation Dialog
+    if (showPermanentConfirmDialog && taskToDelete != null) {
+        val task = taskToDelete!!
+        AlertDialog(
+            onDismissRequest = {
+                showPermanentConfirmDialog = false
+                taskToDelete = null
+            },
+            title = {
+                Text(
+                    text = "Delete this task permanently?",
+                    fontWeight = FontWeight.Bold,
+                    color = FocusTheme.colors.textPrimary
+                )
+            },
+            text = {
+                Text(
+                    text = "This task will be removed from all calendar dates and task lists. This action cannot be undone.",
+                    color = FocusTheme.colors.textSecondary,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (task.recurrenceRuleId != null && task.recurrenceRuleId > 0) {
+                            viewModel.deleteRecurringTaskPermanently(task)
+                        } else {
+                            viewModel.deleteTask(task)
+                        }
+                        showPermanentConfirmDialog = false
+                        taskToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = CrimsonCoral,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Delete Permanently", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        showPermanentConfirmDialog = false
+                        taskToDelete = null
+                    },
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Cancel", color = FocusTheme.colors.textSecondary)
+                }
+            },
+            containerColor = FocusTheme.colors.surface
         )
     }
 }

@@ -58,18 +58,31 @@ class HabitRepository(private val context: Context) {
         val existingHabits = habitDao.getAllHabitsSync()
         val habitsByTitle = existingHabits.associateBy { it.title.trim().lowercase() }.toMutableMap()
 
-        for ((titleKey, taskList) in tasksByTitle) {
+        // 1. Clean up auto-synced routine habits whose tasks were deleted or no longer qualify as a habit
+        for (existingHabit in existingHabits) {
+            val titleKey = existingHabit.title.trim().lowercase()
+            val taskList = tasksByTitle[titleKey] ?: emptyList()
             val isHabit = HabitSyncEngine.isHabitQualifying(taskList)
 
             if (!isHabit) {
-                // One-day task: must NOT be shown in active habits section
-                val existingHabit = habitsByTitle[titleKey]
-                if (existingHabit != null && (existingHabit.description.startsWith("Scheduled:") || existingHabit.description == "Auto-synced routine" || existingHabit.description.startsWith("Monthly") || existingHabit.description.startsWith("Yearly") || existingHabit.description == "Daily routine")) {
+                // If auto-synced from tasks/routines, remove cleanly
+                if (existingHabit.description.startsWith("Scheduled:") ||
+                    existingHabit.description == "Auto-synced routine" ||
+                    existingHabit.description.startsWith("Monthly") ||
+                    existingHabit.description.startsWith("Yearly") ||
+                    existingHabit.description == "Daily routine" ||
+                    existingHabit.description == "Custom routine"
+                ) {
                     habitDao.deleteHabit(existingHabit)
                     habitsByTitle.remove(titleKey)
                 }
-                continue
             }
+        }
+
+        // 2. Sync remaining qualifying habits
+        for ((titleKey, taskList) in tasksByTitle) {
+            val isHabit = HabitSyncEngine.isHabitQualifying(taskList)
+            if (!isHabit) continue
 
             val ruleId = taskList.mapNotNull { it.recurrenceRuleId }.firstOrNull()
             val rule = ruleId?.let { recurrenceDao.getRuleByIdSync(it) }
@@ -95,6 +108,15 @@ class HabitRepository(private val context: Context) {
 
             // Sync completions for this habit
             val existingCompletions = habitDao.getCompletionsForHabitSync(habit.id).associateBy { it.date }
+            val validDates = taskList.map { it.scheduledDate }.toSet()
+
+            // Remove completions for dates that no longer have tasks
+            for (comp in existingCompletions.values) {
+                if (comp.date !in validDates) {
+                    habitDao.deleteCompletion(habit.id, comp.date)
+                }
+            }
+
             for (task in taskList) {
                 val isCompleted = task.status.isCompleted()
                 val comp = existingCompletions[task.scheduledDate]

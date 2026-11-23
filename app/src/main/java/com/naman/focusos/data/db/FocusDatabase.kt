@@ -182,6 +182,11 @@ abstract class FocusDatabase : RoomDatabase() {
                     .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .allowMainThreadQueries()
                     .addCallback(object : Callback() {
+                        override fun onOpen(db: SupportSQLiteDatabase) {
+                            super.onOpen(db)
+                            db.setForeignKeyConstraintsEnabled(true)
+                        }
+
                         override fun onCreate(db: SupportSQLiteDatabase) {
                             super.onCreate(db)
                             // Seed default categories and timetable in background

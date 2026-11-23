@@ -101,6 +101,12 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun deleteRecurringTaskPermanently(task: TaskEntity) {
+        viewModelScope.launch {
+            taskRepository.deleteRecurringTaskPermanently(task)
+        }
+    }
+
     fun createTask(task: TaskEntity, rule: RecurrenceRuleEntity?) {
         viewModelScope.launch {
             if (rule != null) {

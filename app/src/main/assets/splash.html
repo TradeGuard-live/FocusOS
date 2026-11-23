@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>FocusOs</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #0b1018;
+    }
+
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="splash-canvas"></canvas>
+
+  <script>
+    (function () {
+      'use strict';
+
+      const TOTAL_FRAMES = 41;
+      const ANIM_FPS = 14;
+      const DURATION = TOTAL_FRAMES / ANIM_FPS; // ~2.93 seconds
+      const STAGE_SPLIT_FRAME = 28;
+      const ONION_SKIN = true;
+
+      const Ease = {
+        clamp: function (v, min, max) {
+          return v < min ? min : (v > max ? max : v);
+        },
+        norm: function (v, a, b) {
+          return Ease.clamp((v - a) / (b - a), 0, 1);
+        },
+        lerp: function (a, b, t) {
+          return a + (b - a) * t;
+        },
+        outCubic: function (t) {
+          return 1 - Math.pow(1 - t, 3);
+        },
+        inOutCubic: function (t) {
+          return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        },
+        outBack: function (t, s) {
+          const overshoot = s === undefined ? 1.70158 : s;
+          const c3 = overshoot + 1;
+          return 1 + c3 * Math.pow(t - 1, 3) + overshoot * Math.pow(t - 1, 2);
+        }
+      };
+
+      const canvas = document.getElementById('splash-canvas');
+      const ctx = canvas.getContext('2d');
+      let startTime = null;
+
+      function traceSquircle(c, cx, cy, size, exponent) {
+        const half = size * 0.5;
+        const n = exponent || 3.4; // Matches the rounded squircle silhouette of FocusOs
+        const steps = 64;
+        c.beginPath();
+        for (let i = 0; i <= steps; i++) {
+          const a = (i / steps) * Math.PI * 2;
+          const cosA = Math.cos(a);
+          const sinA = Math.sin(a);
+          const x = cx + half * Math.sign(cosA) * Math.pow(Math.abs(cosA), 2 / n);
+          const y = cy + half * Math.sign(sinA) * Math.pow(Math.abs(sinA), 2 / n);
+          if (i === 0) c.moveTo(x, y);
+          else c.lineTo(x, y);
+        }
+        c.closePath();
+      }
+
+      function drawFocusOsIcon(c, opts) {
+        const x = opts.x;
+        const y = opts.y;
+        const size = opts.size;
+        const alpha = opts.alpha !== undefined ? opts.alpha : 1;
+        const drawProgress = opts.drawProgress !== undefined ? opts.drawProgress : 1;
+        const iconScale = opts.iconScale !== undefined ? opts.iconScale : 1;
+        const innerScale = opts.innerScale !== undefined ? opts.innerScale : 1;
+        const glowStrength = opts.glowStrength || 0;
+
+        if (size <= 1 || alpha <= 0.01) return;
+
+        c.save();
+        c.globalAlpha = Ease.clamp(alpha, 0, 1);
+        c.translate(x, y);
+        c.scale(iconScale, iconScale);
+
+        // Dark Navy Squircle Tile (#0F1D32) - clean dark background without outer orange corners
+        c.save();
+        c.shadowColor = glowStrength > 0.01
+          ? 'rgba(34, 184, 232, ' + (0.38 * glowStrength).toFixed(3) + ')'
+          : 'rgba(0, 0, 0, 0.48)';
+        c.shadowBlur = size * (0.22 + glowStrength * 0.24);
+        c.shadowOffsetY = size * 0.08;
+
+        traceSquircle(c, 0, 0, size, 3.4);
+        c.fillStyle = '#0F1D32';
+        c.fill();
+        c.restore();
+
+        // Subtle Inner Edge Highlight
+        traceSquircle(c, 0, 0, size - 1.5, 3.4);
+        c.lineWidth = Math.max(1.5, size * 0.018);
+        c.strokeStyle = glowStrength > 0.01
+          ? 'rgba(16, 185, 129, ' + (0.35 + glowStrength * 0.55).toFixed(3) + ')'
+          : '#1E314D';
+        c.stroke();
+
+        // FocusOs Cyan Ring & Emerald Checkmark
+        c.save();
+        c.scale(innerScale, innerScale);
+        c.lineCap = 'round';
+        c.lineJoin = 'round';
+
+        const ringRadius = size * 0.36;
+        const ringWidth = Math.max(3.5, size * (0.072 + glowStrength * 0.006));
+
+        // 1. Bright Cyan Circle Ring (#22B8E8)
+        const pRing = Ease.outCubic(Ease.norm(drawProgress, 0.0, 0.65));
+        if (pRing > 0.005) {
+          c.save();
+          if (glowStrength > 0.01) {
+            c.shadowColor = 'rgba(34, 184, 232, ' + (0.52 * glowStrength).toFixed(3) + ')';
+            c.shadowBlur = size * 0.16 * glowStrength;
+          }
+          c.strokeStyle = '#22B8E8';
+          c.lineWidth = ringWidth;
+          const startAngle = -Math.PI * 0.5;
+          const endAngle = startAngle + Math.PI * 2 * pRing;
+          c.beginPath();
+          c.arc(0, 0, ringRadius, startAngle, endAngle);
+          c.stroke();
+          c.restore();
+        }
+
+        // 2. Emerald Green Checkmark (#10B981)
+        const pCheck = Ease.norm(drawProgress, 0.26, 1.0);
+        if (pCheck > 0.005) {
+          c.save();
+          if (glowStrength > 0.01) {
+            c.shadowColor = 'rgba(16, 185, 129, ' + (0.55 * glowStrength).toFixed(3) + ')';
+            c.shadowBlur = size * 0.16 * glowStrength;
+          }
+
+          c.strokeStyle = '#10B981';
+          c.lineWidth = Math.max(4, size * (0.078 + glowStrength * 0.006));
+
+          // Checkmark coordinates matching the uploaded FocusOs emblem
+          const p0x = -size * 0.145, p0y = -size * 0.005;
+          const p1x = -size * 0.035, p1y = size * 0.105;
+          const p2x = size * 0.165, p2y = -size * 0.095;
+
+          const len1 = Math.hypot(p1x - p0x, p1y - p0y);
+          const len2 = Math.hypot(p2x - p1x, p2y - p1y);
+          const splitRatio = len1 / (len1 + len2);
+
+          c.beginPath();
+          c.moveTo(p0x, p0y);
+
+          if (pCheck <= splitRatio) {
+            const t1 = pCheck / splitRatio;
+            c.lineTo(Ease.lerp(p0x, p1x, t1), Ease.lerp(p0y, p1y, t1));
+          } else {
+            c.lineTo(p1x, p1y);
+            const t2 = (pCheck - splitRatio) / (1 - splitRatio);
+            c.lineTo(Ease.lerp(p1x, p2x, t2), Ease.lerp(p1y, p2y, t2));
+          }
+          c.stroke();
+          c.restore();
+        }
+
+        c.restore();
+        c.restore();
+      }
+
+      function drawSparkleAccents(c, cx, cy, iconSize, frameFloat) {
+        const sparkles = [
+          { dx: -0.68, dy: -0.56, start: 6, dur: 11, color: '#22B8E8', r: 6 },
+          { dx: 0.72, dy: -0.52, start: 11, dur: 11, color: '#10B981', r: 7 },
+          { dx: -0.62, dy: 0.58, start: 15, dur: 10, color: '#38BDF8', r: 5.5 }
+        ];
+
+        for (let i = 0; i < sparkles.length; i++) {
+          const sp = sparkles[i];
+          const p = Ease.norm(frameFloat, sp.start, sp.start + sp.dur);
+          if (p <= 0 || p >= 1) continue;
+
+          const env = Math.sin(p * Math.PI);
+          const sx = cx + sp.dx * iconSize * (0.95 + p * 0.22);
+          const sy = cy + sp.dy * iconSize * (0.95 + p * 0.22);
+          const rad = sp.r * env;
+
+          c.save();
+          c.globalAlpha = env * 0.85;
+          c.translate(sx, sy);
+          c.rotate(p * 0.8);
+          c.fillStyle = sp.color;
+
+          c.beginPath();
+          c.moveTo(0, -rad);
+          c.quadraticCurveTo(0, 0, rad, 0);
+          c.quadraticCurveTo(0, 0, 0, rad);
+          c.quadraticCurveTo(0, 0, -rad, 0);
+          c.quadraticCurveTo(0, 0, 0, -rad);
+          c.closePath();
+          c.fill();
+          c.restore();
+        }
+      }
+
+      function drawWordmark(c, opts) {
+        const startX = opts.x;
+        const centerY = opts.y;
+        const fontSize = opts.fontSize;
+        const introT = opts.introT;
+        const retractT = opts.retractT || 0;
+        const clipLeftX = opts.clipLeftX;
+
+        const word = 'FocusOs';
+        c.save();
+
+        if (clipLeftX !== undefined) {
+          c.beginPath();
+          c.rect(clipLeftX, 0, 4000, 4000);
+          c.clip();
+        }
+
+        c.font = '800 ' + fontSize + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+        c.textBaseline = 'middle';
+        c.textAlign = 'left';
+
+        const totalWidth = c.measureText(word).width;
+        const osGradient = c.createLinearGradient(
+          startX + totalWidth * 0.62,
+          centerY - fontSize * 0.4,
+          startX + totalWidth,
+          centerY + fontSize * 0.4
+        );
+        osGradient.addColorStop(0, '#22B8E8');
+        osGradient.addColorStop(1, '#10B981');
+
+        const slideBackX = -Ease.inOutCubic(retractT) * (totalWidth + fontSize * 0.65);
+
+        let penX = startX;
+        for (let i = 0; i < word.length; i++) {
+          const ch = word[i];
+          const chWidth = c.measureText(ch).width;
+          const isOsPart = i >= 5; // "Focus" in crisp white, "Os" in cyan-emerald gradient
+
+          const charStart = (i / word.length) * 0.52;
+          const charEnd = charStart + 0.48;
+          const localIn = Ease.norm(introT, charStart, charEnd);
+          const springScale = Ease.outBack(localIn, 1.85);
+          const alpha = Ease.clamp(localIn * 1.45, 0, 1) * (1 - Ease.norm(retractT, 0.45, 0.95));
+
+          if (alpha > 0.01 && springScale > 0.01) {
+            const liftY = (1 - Ease.outCubic(localIn)) * fontSize * 0.36;
+            const drawX = penX + slideBackX;
+
+            if (ONION_SKIN && localIn > 0.06 && localIn < 0.88 && retractT === 0) {
+              c.save();
+              c.globalAlpha = 0.22 * (1 - localIn);
+              c.translate(drawX + chWidth * 0.5, centerY + liftY * 1.75);
+              c.scale(springScale * 0.9, springScale * 0.9);
+              c.fillStyle = isOsPart ? '#10B981' : '#22B8E8';
+              c.fillText(ch, -chWidth * 0.5, 0);
+              c.restore();
+            }
+
+            c.save();
+            c.globalAlpha = alpha;
+            c.translate(drawX + chWidth * 0.5, centerY + liftY);
+            c.scale(springScale, springScale);
+            c.fillStyle = isOsPart ? osGradient : '#f8fafc';
+            c.fillText(ch, -chWidth * 0.5, 0);
+            c.restore();
+          }
+
+          penX += chWidth;
+        }
+
+        c.restore();
+      }
+
+      function renderScene(frameFloat) {
+        const dpr = window.devicePixelRatio || 1;
+        const w = canvas.width / dpr;
+        const h = canvas.height / dpr;
+        if (w <= 0 || h <= 0) return;
+
+        ctx.save();
+        ctx.scale(dpr, dpr);
+
+        // Background
+        ctx.fillStyle = '#0b1018';
+        ctx.fillRect(0, 0, w, h);
+
+        // Subtle Grid
+        const gridStep = Math.max(28, Math.round(Math.min(w, h) / 12));
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.045)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let gx = (w / 2) % gridStep; gx < w; gx += gridStep) {
+          ctx.moveTo(gx, 0);
+          ctx.lineTo(gx, h);
+        }
+        for (let gy = (h / 2) % gridStep; gy < h; gy += gridStep) {
+          ctx.moveTo(0, gy);
+          ctx.lineTo(w, gy);
+        }
+        ctx.stroke();
+
+        // Ambient Radial Glow (Cyan & Emerald)
+        const cx = w * 0.5;
+        const cy = h * 0.5;
+        const minDim = Math.min(w, h);
+        const radGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, minDim * 0.55);
+        radGlow.addColorStop(0, 'rgba(34, 184, 232, 0.11)');
+        radGlow.addColorStop(0.55, 'rgba(16, 185, 129, 0.05)');
+        radGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = radGlow;
+        ctx.fillRect(0, 0, w, h);
+
+        // Responsive Sizing (Adapts to both mobile portrait & desktop landscape)
+        const iconSize = Ease.clamp(minDim * 0.21, 60, 120);
+        const fontSize = Math.round(iconSize * 0.60);
+        const gap = Math.round(iconSize * 0.22);
+
+        ctx.font = '800 ' + fontSize + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+        const wordWidth = ctx.measureText('FocusOs').width;
+        const lockupWidth = iconSize + gap + wordWidth;
+        const leftLockupIconX = cx - lockupWidth * 0.5 + iconSize * 0.5;
+
+        if (frameFloat <= STAGE_SPLIT_FRAME) {
+          const p1 = Ease.norm(frameFloat, 0, STAGE_SPLIT_FRAME);
+          const popScale = Ease.outBack(Ease.norm(p1, 0.0, 0.42), 1.85);
+          const strokeDraw = Ease.outCubic(Ease.norm(p1, 0.06, 0.66));
+          const textIntro = Ease.norm(p1, 0.12, 0.88);
+          const slideLeft = Ease.outCubic(Ease.norm(p1, 0.08, 0.52));
+
+          const iconX = Ease.lerp(cx, leftLockupIconX, slideLeft);
+          const textX = iconX + iconSize * 0.5 + gap;
+
+          if (ONION_SKIN && p1 > 0.04 && p1 < 0.48) {
+            drawFocusOsIcon(ctx, {
+              x: Ease.lerp(cx, iconX, 0.6),
+              y: cy,
+              size: iconSize * popScale * 0.94,
+              alpha: 0.2 * (1 - p1 * 2),
+              drawProgress: strokeDraw
+            });
+          }
+
+          drawWordmark(ctx, {
+            x: textX,
+            y: cy,
+            fontSize: fontSize,
+            introT: textIntro,
+            retractT: 0,
+            clipLeftX: iconX
+          });
+
+          drawFocusOsIcon(ctx, {
+            x: iconX,
+            y: cy,
+            size: iconSize * popScale,
+            drawProgress: strokeDraw
+          });
+
+          drawSparkleAccents(ctx, iconX, cy, iconSize, frameFloat);
+        } else {
+          const p2 = Ease.norm(frameFloat, STAGE_SPLIT_FRAME, TOTAL_FRAMES);
+          const retractT = Ease.norm(p2, 0.0, 0.72);
+          const centerGlide = Ease.inOutCubic(Ease.norm(p2, 0.12, 0.88));
+
+          const iconX = Ease.lerp(leftLockupIconX, cx, centerGlide);
+          const textX = iconX + iconSize * 0.5 + gap;
+
+          const beatEnv = Math.sin(Ease.norm(p2, 0.18, 1.0) * Math.PI);
+          const elasticScale = 1 + beatEnv * 0.13;
+          const innerBeat = 1 + beatEnv * 0.09;
+          const baseGrow = Ease.lerp(1.0, 1.12, centerGlide);
+
+          if (retractT < 0.98) {
+            drawWordmark(ctx, {
+              x: textX,
+              y: cy,
+              fontSize: fontSize,
+              introT: 1,
+              retractT: retractT,
+              clipLeftX: iconX
+            });
+          }
+
+          if (ONION_SKIN && beatEnv > 0.15) {
+            drawFocusOsIcon(ctx, {
+              x: iconX,
+              y: cy,
+              size: iconSize * baseGrow * (1 + beatEnv * 0.2),
+              alpha: 0.16 * beatEnv,
+              drawProgress: 1
+            });
+          }
+
+          drawFocusOsIcon(ctx, {
+            x: iconX,
+            y: cy,
+            size: iconSize * baseGrow,
+            iconScale: elasticScale,
+            innerScale: innerBeat,
+            drawProgress: 1,
+            glowStrength: beatEnv
+          });
+        }
+
+        ctx.restore();
+      }
+
+      function resizeCanvas() {
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.max(1, Math.round(window.innerWidth * dpr));
+        canvas.height = Math.max(1, Math.round(window.innerHeight * dpr));
+      }
+
+      window.addEventListener('resize', resizeCanvas);
+
+      function tick(now) {
+        if (!startTime) startTime = now;
+        const elapsed = (now - startTime) / 1000;
+
+        // Plays once and holds cleanly on the final frame (Frame 41)
+        const frameFloat = Ease.clamp((elapsed / DURATION) * TOTAL_FRAMES, 0, TOTAL_FRAMES);
+        renderScene(frameFloat);
+
+        if (elapsed < DURATION) {
+          requestAnimationFrame(tick);
+        } else {
+          // Notify Android host that animation is complete
+          if (window.AndroidBridge && window.AndroidBridge.onAnimationFinished) {
+            window.AndroidBridge.onAnimationFinished();
+          }
+        }
+      }
+
+      // Allow tap to skip immediately
+      canvas.addEventListener('click', function () {
+        if (window.AndroidBridge && window.AndroidBridge.onAnimationFinished) {
+          window.AndroidBridge.onAnimationFinished();
+        }
+      });
+
+      resizeCanvas();
+      requestAnimationFrame(tick);
+    })();
+  </script>
+</body>
+</html>

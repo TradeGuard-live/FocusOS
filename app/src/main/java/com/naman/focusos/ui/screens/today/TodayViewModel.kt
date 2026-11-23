@@ -151,6 +151,12 @@ class TodayViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun deleteRecurringTaskPermanently(task: TaskEntity) {
+        viewModelScope.launch {
+            taskRepository.deleteRecurringTaskPermanently(task)
+        }
+    }
+
     fun createTask(task: TaskEntity, recurrenceRule: RecurrenceRuleEntity?) {
         viewModelScope.launch {
             if (recurrenceRule != null) {

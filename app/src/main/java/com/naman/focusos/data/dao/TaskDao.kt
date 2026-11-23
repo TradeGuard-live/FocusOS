@@ -62,6 +62,21 @@ interface TaskDao {
     @Query("DELETE FROM tasks WHERE id = :id")
     suspend fun deleteTaskById(id: Long)
 
+    @Query("DELETE FROM tasks WHERE id IN (:ids)")
+    suspend fun deleteTasksByIds(ids: List<Long>)
+
+    @Query("SELECT * FROM tasks WHERE recurrenceRuleId = :ruleId")
+    suspend fun getTasksByRecurrenceRule(ruleId: Long): List<TaskEntity>
+
+    @Query("SELECT * FROM tasks WHERE recurrenceRuleId = :ruleId")
+    fun getTasksByRecurrenceRuleSync(ruleId: Long): List<TaskEntity>
+
+    @Query("SELECT * FROM tasks WHERE recurrenceRuleId = :ruleId AND scheduledDate >= :fromDate")
+    suspend fun getFutureTasksByRecurrenceRule(ruleId: Long, fromDate: String): List<TaskEntity>
+
+    @Query("DELETE FROM tasks WHERE recurrenceRuleId = :ruleId AND scheduledDate >= :fromDate")
+    suspend fun deleteFutureTasksByRecurrenceRule(ruleId: Long, fromDate: String)
+
     @Query("DELETE FROM tasks WHERE recurrenceRuleId = :ruleId")
     suspend fun deleteTasksByRecurrenceRule(ruleId: Long)
 

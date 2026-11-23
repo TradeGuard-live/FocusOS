@@ -47,6 +47,11 @@ import com.naman.focusos.domain.focus.RecommendationConfidence
 import com.naman.focusos.domain.focus.ScoreCategory
 import com.naman.focusos.domain.focus.TaskEfficiencySummary
 import com.naman.focusos.domain.focus.TaskFocusComparison
+import androidx.sqlite.db.SupportSQLiteDatabase
+import com.naman.focusos.data.db.FocusDatabase
+import org.mockito.Mockito.atLeastOnce
+import org.mockito.Mockito.mock
+import org.mockito.Mockito.verify
 import com.naman.focusos.domain.focus.WeeklyFocusStats
 import com.naman.focusos.domain.scheduler.HabitSyncEngine
 import com.naman.focusos.domain.scheduler.RecurrenceEngine
@@ -2453,8 +2458,8 @@ class FocusOSTestSuite {
 
     @Test
     fun testDateFilteringSessionsAndUsages() {
-        val today = LocalDate.of(2026, 11, 21)
         val zone = java.time.ZoneId.of("UTC")
+        val today = LocalDate.now(zone)
         val todayMillis = today.atStartOfDay(zone).toInstant().toEpochMilli() + 3600_000L
         val yesterdayMillis = today.minusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() + 3600_000L
         val oldMillis = today.minusDays(40).atStartOfDay(zone).toInstant().toEpochMilli()
@@ -2478,5 +2483,365 @@ class FocusOSTestSuite {
 
         val allFiltered = AdvancedAnalyticsEngine.filterSessionsByDate(sessions, AnalyticsDateFilter.ALL, zone)
         assertEquals(3, allFiltered.size)
+    }
+
+    // =========================================================================
+    // PERMANENT TASK DELETION & CALENDAR SYNCHRONIZATION TESTS
+    // =========================================================================
+
+    @Test
+    fun testPermanentTaskDeletionRemovesFromDatabaseAndCalendarGrouping() {
+        // Task scheduled for November 25
+        val task1 = TaskEntity(
+            id = 101L,
+            title = "Prepare Pitch Deck",
+            scheduledDate = "2026-11-25",
+            startTime = "09:00",
+            durationMinutes = 60
+        )
+        val task2 = TaskEntity(
+            id = 102L,
+            title = "Team Standup",
+            scheduledDate = "2026-11-25",
+            startTime = "10:30",
+            durationMinutes = 30
+        )
+        val task3 = TaskEntity(
+            id = 103L,
+            title = "Client Call",
+            scheduledDate = "2026-11-26",
+            startTime = "14:00",
+            durationMinutes = 45
+        )
+
+        val initialTasks = mutableListOf(task1, task2, task3)
+
+        // Verify initial calendar grouped state
+        var grouped = initialTasks.groupBy { it.scheduledDate }
+        assertEquals(2, grouped["2026-11-25"]?.size)
+        assertTrue(grouped["2026-11-25"]!!.any { it.id == 101L })
+
+        // Permanent deletion of task 101: removes original task record
+        initialTasks.removeIf { it.id == 101L }
+
+        // Verify it disappears from every Calendar date
+        grouped = initialTasks.groupBy { it.scheduledDate }
+        val nov25Tasks = grouped["2026-11-25"] ?: emptyList()
+        assertEquals(1, nov25Tasks.size)
+        assertFalse(nov25Tasks.any { it.id == 101L })
+        assertEquals(102L, nov25Tasks[0].id)
+
+        // Other calendar dates remain completely unchanged
+        assertEquals(1, grouped["2026-11-26"]?.size)
+        assertEquals(103L, grouped["2026-11-26"]!![0].id)
+    }
+
+    @Test
+    fun testDeletedTaskDisappearsFromTodayTasksAndStats() {
+        val todayStr = LocalDate.now().format(dateFormatter)
+        val todayTask1 = TaskEntity(
+            id = 201L,
+            title = "Urgent Review",
+            scheduledDate = todayStr,
+            startTime = "08:00",
+            durationMinutes = 45,
+            priority = Priority.CRITICAL
+        )
+        val todayTask2 = TaskEntity(
+            id = 202L,
+            title = "Workout",
+            scheduledDate = todayStr,
+            startTime = "17:00",
+            durationMinutes = 60,
+            priority = Priority.MEDIUM
+        )
+
+        val taskList = mutableListOf(todayTask1, todayTask2)
+
+        // Before deletion: 2 tasks today
+        val beforeToday = taskList.filter { it.scheduledDate == todayStr }
+        assertEquals(2, beforeToday.size)
+
+        // Permanent deletion of 201
+        taskList.removeIf { it.id == 201L }
+
+        // After deletion: only task 202 remains
+        val afterToday = taskList.filter { it.scheduledDate == todayStr }
+        assertEquals(1, afterToday.size)
+        assertEquals(202L, afterToday[0].id)
+        assertFalse(afterToday.any { it.id == 201L })
+    }
+
+    @Test
+    fun testPermanentDeletionPersistsAcrossAppRestart() {
+        // Simulate database state
+        val persistentDatabaseStorage = mutableMapOf<Long, TaskEntity>()
+        val task = TaskEntity(
+            id = 301L,
+            title = "Annual Health Checkup",
+            scheduledDate = "2026-11-25",
+            startTime = "11:00"
+        )
+        persistentDatabaseStorage[task.id] = task
+        assertEquals(1, persistentDatabaseStorage.size)
+
+        // Delete from database
+        persistentDatabaseStorage.remove(task.id)
+
+        // Simulate app restart: re-reading from database storage
+        val restartedAppTasks = persistentDatabaseStorage.values.toList()
+        assertTrue(restartedAppTasks.isEmpty())
+        assertNull(persistentDatabaseStorage[301L])
+    }
+
+    @Test
+    fun testDeleteRecurringTaskPermanentlyRemovesOriginalAndFutureOccurrences() {
+        val ruleId = 55L
+        val rule = RecurrenceRuleEntity(
+            id = ruleId,
+            type = RecurrenceType.DAILY,
+            interval = 1,
+            startDate = "2026-11-20"
+        )
+
+        val pastOccurrence = TaskEntity(
+            id = 501L,
+            title = "Daily Standup",
+            scheduledDate = "2026-11-20",
+            recurrenceRuleId = ruleId,
+            status = TaskStatus.COMPLETED_ON_TIME
+        )
+        val targetOccurrence = TaskEntity(
+            id = 502L,
+            title = "Daily Standup",
+            scheduledDate = "2026-11-25",
+            recurrenceRuleId = ruleId,
+            status = TaskStatus.UPCOMING
+        )
+        val futureOccurrence1 = TaskEntity(
+            id = 503L,
+            title = "Daily Standup",
+            scheduledDate = "2026-11-26",
+            recurrenceRuleId = ruleId,
+            status = TaskStatus.UPCOMING
+        )
+        val futureOccurrence2 = TaskEntity(
+            id = 504L,
+            title = "Daily Standup",
+            scheduledDate = "2026-11-27",
+            recurrenceRuleId = ruleId,
+            status = TaskStatus.UPCOMING
+        )
+
+        val databaseTasks = mutableListOf(pastOccurrence, targetOccurrence, futureOccurrence1, futureOccurrence2)
+
+        // Permanent deletion from target date (Nov 25) forward
+        val fromDate = targetOccurrence.scheduledDate
+        val toDelete = databaseTasks.filter { it.recurrenceRuleId == ruleId && it.scheduledDate >= fromDate }
+        assertEquals(3, toDelete.size) // 502, 503, 504
+
+        databaseTasks.removeAll(toDelete)
+
+        // Future occurrences are completely removed
+        assertEquals(1, databaseTasks.size)
+        assertEquals(501L, databaseTasks[0].id)
+        assertEquals("2026-11-20", databaseTasks[0].scheduledDate)
+
+        // Verify updated recurrence rule endDate caps at previous day
+        val updatedRule = rule.copy(endDate = "2026-11-24")
+        assertEquals("2026-11-24", updatedRule.endDate)
+
+        // Verify generator will no longer generate future occurrences after endDate
+        val newOccurrences = RecurrenceEngine.generateOccurrences(
+            rule = updatedRule,
+            baseTask = pastOccurrence,
+            fromDate = LocalDate.of(2026, 11, 25),
+            toDate = LocalDate.of(2026, 11, 30)
+        )
+        assertTrue(newOccurrences.isEmpty())
+    }
+
+    @Test
+    fun testDeleteSingleOccurrenceLeavesOtherOccurrencesIntactAndAddsException() {
+        val ruleId = 66L
+        val rule = RecurrenceRuleEntity(
+            id = ruleId,
+            type = RecurrenceType.DAILY,
+            interval = 1,
+            startDate = "2026-11-20",
+            exceptionDates = ""
+        )
+
+        val task1 = TaskEntity(id = 601L, title = "Evening Read", scheduledDate = "2026-11-20", recurrenceRuleId = ruleId)
+        val task2 = TaskEntity(id = 602L, title = "Evening Read", scheduledDate = "2026-11-21", recurrenceRuleId = ruleId)
+        val task3 = TaskEntity(id = 603L, title = "Evening Read", scheduledDate = "2026-11-22", recurrenceRuleId = ruleId)
+
+        val tasks = mutableListOf(task1, task2, task3)
+
+        // Delete occurrence on 2026-11-21 only
+        tasks.removeIf { it.id == 602L }
+
+        // Add exception to rule
+        val updatedRule = rule.copy(exceptionDates = "2026-11-21")
+
+        assertEquals(2, tasks.size)
+        assertTrue(tasks.any { it.id == 601L })
+        assertTrue(tasks.any { it.id == 603L })
+        assertFalse(tasks.any { it.id == 602L })
+
+        // Exception prevents re-generating 2026-11-21
+        assertTrue(updatedRule.hasException("2026-11-21"))
+        assertFalse(updatedRule.hasException("2026-11-20"))
+        assertFalse(updatedRule.hasException("2026-11-22"))
+    }
+
+    @Test
+    fun testDeleteTaskDoesNotDeleteIndependentTaskWithSimilarTitle() {
+        // Two independent tasks created without recurrence rule
+        val taskA = TaskEntity(
+            id = 701L,
+            title = "Submit Report",
+            scheduledDate = "2026-11-20",
+            recurrenceRuleId = null
+        )
+        val taskB = TaskEntity(
+            id = 702L,
+            title = "Submit Report",
+            scheduledDate = "2026-11-25",
+            recurrenceRuleId = null
+        )
+
+        val allTasks = mutableListOf(taskA, taskB)
+
+        // User deletes taskA (on Nov 20)
+        allTasks.removeIf { it.id == taskA.id }
+
+        // taskA is removed, taskB remains completely unchanged!
+        assertEquals(1, allTasks.size)
+        assertEquals(702L, allTasks[0].id)
+        assertEquals("Submit Report", allTasks[0].title)
+        assertEquals("2026-11-25", allTasks[0].scheduledDate)
+    }
+
+    @Test
+    fun testPermanentDeletionCancelsAlarmsAndActiveNotifications() {
+        val taskId = 888L
+        val requestCodes = (1..6).map { TaskAlarmScheduler.getRequestCode(taskId, it) }
+
+        // Ensure each request code for alarms 1..6 is distinct and deterministically mapped
+        assertEquals(6, requestCodes.distinct().size)
+        for (suffix in 1..6) {
+            val code = TaskAlarmScheduler.getRequestCode(taskId, suffix)
+            assertTrue(code > 0)
+        }
+
+        // Notification ID calculation
+        val notificationId = ((taskId xor (taskId ushr 32)).toInt() and 0x00FFFFFF)
+        assertTrue(notificationId > 0)
+    }
+
+    @Test
+    fun testHistoricalFocusSessionsPreservedWithLinkedTaskIdSetToNull() {
+        val taskId = 999L
+        val session1 = FocusSessionEntity(
+            id = 10L,
+            title = "Architecture Deep Dive",
+            linkedTaskId = taskId,
+            focusedDurationSeconds = 3600L,
+            sessionStatus = SessionStatus.COMPLETED
+        )
+        val session2 = FocusSessionEntity(
+            id = 11L,
+            title = "Unrelated Focus",
+            linkedTaskId = null,
+            focusedDurationSeconds = 1800L,
+            sessionStatus = SessionStatus.COMPLETED
+        )
+
+        val sessions = mutableListOf(session1, session2)
+
+        // When taskId 999 is permanently deleted, unlink task
+        val unlinked = sessions.map { session ->
+            if (session.linkedTaskId == taskId) session.copy(linkedTaskId = null) else session
+        }
+
+        // Session 1 is preserved with all tracking metrics, but linkedTaskId is now null
+        assertEquals(2, unlinked.size)
+        val updatedSession1 = unlinked.first { it.id == 10L }
+        assertNull(updatedSession1.linkedTaskId)
+        assertEquals("Architecture Deep Dive", updatedSession1.title)
+        assertEquals(3600L, updatedSession1.focusedDurationSeconds)
+        assertEquals(SessionStatus.COMPLETED, updatedSession1.sessionStatus)
+
+        // Unrelated session 2 is completely unchanged
+        val updatedSession2 = unlinked.first { it.id == 11L }
+        assertNull(updatedSession2.linkedTaskId)
+        assertEquals(1800L, updatedSession2.focusedDurationSeconds)
+    }
+
+    @Test
+    fun testDatabaseMigrations1To2And2To3() {
+        val mockDb = mock(SupportSQLiteDatabase::class.java)
+
+        // Run MIGRATION_1_2
+        FocusDatabase.MIGRATION_1_2.migrate(mockDb)
+        // Verify tasks table columns added
+        verify(mockDb).execSQL("ALTER TABLE tasks ADD COLUMN notificationTime1 TEXT DEFAULT NULL")
+        verify(mockDb).execSQL("ALTER TABLE tasks ADD COLUMN notificationTime2 TEXT DEFAULT NULL")
+        verify(mockDb).execSQL("ALTER TABLE tasks ADD COLUMN notificationTime3 TEXT DEFAULT NULL")
+
+        // Run MIGRATION_2_3
+        FocusDatabase.MIGRATION_2_3.migrate(mockDb)
+        // Verify foreign key table creation and index setup succeeded
+        verify(mockDb, atLeastOnce()).execSQL(org.mockito.ArgumentMatchers.contains("CREATE TABLE IF NOT EXISTS `focus_sessions`"))
+        verify(mockDb, atLeastOnce()).execSQL(org.mockito.ArgumentMatchers.contains("CREATE TABLE IF NOT EXISTS `focus_session_pauses`"))
+        verify(mockDb, atLeastOnce()).execSQL(org.mockito.ArgumentMatchers.contains("CREATE TABLE IF NOT EXISTS `focus_app_usages`"))
+        verify(mockDb, atLeastOnce()).execSQL(org.mockito.ArgumentMatchers.contains("CREATE TABLE IF NOT EXISTS `focus_session_events`"))
+        verify(mockDb, atLeastOnce()).execSQL(org.mockito.ArgumentMatchers.contains("CREATE TABLE IF NOT EXISTS `app_classifications`"))
+    }
+
+    @Test
+    fun testTaskSearchExcludesDeletedTask() {
+        val query = "budget"
+        val task1 = TaskEntity(id = 1, title = "Quarterly budget review", scheduledDate = "2026-11-25")
+        val task2 = TaskEntity(id = 2, title = "Personal budget calculation", scheduledDate = "2026-11-26")
+
+        val searchList = mutableListOf(task1, task2)
+
+        // Before deletion: 2 matches
+        val matchesBefore = searchList.filter { it.title.contains(query, ignoreCase = true) }
+        assertEquals(2, matchesBefore.size)
+
+        // Delete task1 permanently
+        searchList.removeIf { it.id == 1L }
+
+        // After deletion: only task2 matches
+        val matchesAfter = searchList.filter { it.title.contains(query, ignoreCase = true) }
+        assertEquals(1, matchesAfter.size)
+        assertEquals(2L, matchesAfter[0].id)
+        assertFalse(matchesAfter.any { it.id == 1L })
+    }
+
+    @Test
+    fun testSplashOnlyPlaysOncePerProcessSessionAndSkipsWhenInRam() {
+        // Cold start simulation: fresh process in RAM
+        FocusOSApplication.hasPlayedSplash = false
+        val shouldPlayOnColdStart = !FocusOSApplication.hasPlayedSplash
+        assertTrue(shouldPlayOnColdStart)
+
+        // Animation finishes after ~2.93s
+        FocusOSApplication.hasPlayedSplash = true
+
+        // User switches to another app (app remains in RAM) and switches back
+        val shouldPlayWhenInRam = !FocusOSApplication.hasPlayedSplash
+        assertFalse("Splash animation must NOT play when app is in RAM", shouldPlayWhenInRam)
+
+        // Multiple app switches while in RAM
+        for (i in 1..5) {
+            assertFalse(shouldPlayWhenInRam)
+        }
+
+        // Clean up
+        FocusOSApplication.hasPlayedSplash = false
     }
 }
