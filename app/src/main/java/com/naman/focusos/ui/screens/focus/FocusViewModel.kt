@@ -151,14 +151,14 @@ class FocusViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         // Observe live timer from service
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             FocusTimerService.activeSessionSnapshot.collect { snapshot ->
-                _uiState.value = _uiState.value.copy(liveSnapshot = snapshot)
+                _uiState.update { it.copy(liveSnapshot = snapshot) }
             }
         }
 
         // Observe active session from DB
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             var hasTriggeredRecovery = false
             repository.getActiveSessionFlow().collect { active ->
                 val currentSnapshot = _uiState.value.liveSnapshot
@@ -209,39 +209,46 @@ class FocusViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         // Observe all sessions and compute basic stats
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             repository.getAllSessions().collect { sessions ->
-                val filtered = applyFilter(sessions, _uiState.value.historyFilter)
-                val daily = analyticsEngine.computeDailyStats(sessions, LocalDate.now())
-                val weekly = analyticsEngine.computeWeeklyStats(sessions)
+                val historyFilter = _uiState.value.historyFilter
+                val (filtered, daily, weekly) = withContext(Dispatchers.Default) {
+                    Triple(
+                        applyFilter(sessions, historyFilter),
+                        analyticsEngine.computeDailyStats(sessions, LocalDate.now()),
+                        analyticsEngine.computeWeeklyStats(sessions)
+                    )
+                }
 
-                _uiState.value = _uiState.value.copy(
-                    allSessions = sessions,
-                    filteredSessions = filtered,
-                    dailyStats = daily,
-                    weeklyStats = weekly
-                )
+                _uiState.update {
+                    it.copy(
+                        allSessions = sessions,
+                        filteredSessions = filtered,
+                        dailyStats = daily,
+                        weeklyStats = weekly
+                    )
+                }
             }
         }
 
         // Observe tasks
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             taskRepository.getAllTasks().collect { tasks ->
-                _uiState.value = _uiState.value.copy(
-                    availableTasks = tasks.filter { !it.status.isCompleted() }
-                )
+                _uiState.update {
+                    it.copy(availableTasks = tasks.filter { t -> !t.status.isCompleted() })
+                }
             }
         }
 
         // Observe categories
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             categoryRepository.getAllCategories().collect { categories ->
-                _uiState.value = _uiState.value.copy(availableCategories = categories)
+                _uiState.update { it.copy(availableCategories = categories) }
             }
         }
 
         // Observe and compute Advanced Intelligence
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             combine(
                 combine(repository.getAllSessions(), repository.getAllAppUsages(), ::Pair),
                 combine(taskRepository.getAllTasks(), categoryRepository.getAllCategories(), ::Pair),
@@ -283,18 +290,18 @@ class FocusViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         // Observe classifications
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             repository.getAllClassifications().collect { list ->
-                _uiState.value = _uiState.value.copy(classfications = list)
+                _uiState.update { it.copy(classfications = list) }
             }
         }
 
         // Observe user settings
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             prefsManager.userSettingsFlow.collect { settings ->
-                _uiState.value = _uiState.value.copy(
-                    defaultDurationMinutes = settings.focusDefaultDurationMinutes
-                )
+                _uiState.update {
+                    it.copy(defaultDurationMinutes = settings.focusDefaultDurationMinutes)
+                }
             }
         }
     }
@@ -313,13 +320,13 @@ class FocusViewModel(application: Application) : AndroidViewModel(application) {
         }
         currentObservedSessionId = sessionId
         activeSessionDetailsJob?.cancel()
-        activeSessionDetailsJob = viewModelScope.launch {
-            launch {
+        activeSessionDetailsJob = viewModelScope.launch(Dispatchers.Default) {
+            launch(Dispatchers.Default) {
                 repository.getPausesForSession(sessionId).collect { pauses ->
                     _uiState.update { it.copy(activeSessionPauses = pauses) }
                 }
             }
-            launch {
+            launch(Dispatchers.Default) {
                 repository.getAppUsagesForSession(sessionId).collect { usages ->
                     val top = withContext(Dispatchers.Default) {
                         analyticsEngine.computeAppStats(usages)
@@ -332,7 +339,7 @@ class FocusViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             }
-            launch {
+            launch(Dispatchers.Default) {
                 repository.getEventsForSession(sessionId).collect { events ->
                     _uiState.update { it.copy(activeSessionEvents = events) }
                 }
@@ -348,7 +355,7 @@ class FocusViewModel(application: Application) : AndroidViewModel(application) {
         targetDurationMinutes: Int,
         monitoringEnabled: Boolean
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val targetSecs = targetDurationMinutes.toLong() * 60L
             val sessionId = repository.startSession(
                 title = title,
@@ -419,7 +426,7 @@ class FocusViewModel(application: Application) : AndroidViewModel(application) {
         val sessionId = _uiState.value.completedSessionId
         val snapshot = _uiState.value.completionReportSnapshot
         if (sessionId != null && snapshot != null) {
-            viewModelScope.launch {
+            viewModelScope.launch(Dispatchers.IO) {
                 repository.completeSession(sessionId, snapshot, markLinkedTaskAsCompleted)
             }
         }
@@ -431,7 +438,7 @@ class FocusViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteSession(sessionId: Long) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.deleteSession(sessionId)
             if (_uiState.value.inspectedSession?.id == sessionId) {
                 _uiState.value = _uiState.value.copy(
@@ -447,7 +454,7 @@ class FocusViewModel(application: Application) : AndroidViewModel(application) {
     fun inspectSession(session: FocusSessionEntity?) {
         _uiState.value = _uiState.value.copy(inspectedSession = session)
         if (session != null) {
-            viewModelScope.launch {
+            viewModelScope.launch(Dispatchers.IO) {
                 val pauses = repository.getPausesForSessionSync(session.id)
                 val usages = repository.getAppUsagesForSessionSync(session.id)
                 val events = repository.getEventsForSessionSync(session.id)
@@ -478,7 +485,7 @@ class FocusViewModel(application: Application) : AndroidViewModel(application) {
         classification: AppClassification,
         isExcluded: Boolean = false
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.updateAppClassification(packageName, appName, classification, isExcluded)
         }
     }

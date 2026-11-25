@@ -1,4 +1,3 @@
-// Cleaned CalendarScreen.kt after fixing syntax errors
 package com.naman.focusos.ui.screens.calendar
 
 import androidx.compose.foundation.background
@@ -135,7 +134,7 @@ fun CalendarScreen(
                 }
             }
 
-            // Header for selected date
+            // Tasks for Selected Date
             item {
                 val formatter = DateTimeFormatter.ofPattern("EEEE, MMMM d")
                 Row(
@@ -215,7 +214,6 @@ fun CalendarScreen(
         }
     }
 
-    // Add/Edit sheet
     if (showAddTaskSheet || taskToEdit != null) {
         QuickAddTaskSheet(
             categories = uiState.categories,
@@ -344,8 +342,7 @@ fun CalendarScreen(
                         containerColor = CrimsonCoral,
                         contentColor = Color.White
                     ),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    shape = RoundedCornerShape(10.dp)
                 ) {
                     Text("Delete Permanently", fontWeight = FontWeight.Bold)
                 }
