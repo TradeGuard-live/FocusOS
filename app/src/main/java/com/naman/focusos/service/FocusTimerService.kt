@@ -137,7 +137,6 @@ class FocusTimerService : Service() {
     }
 
     private fun handlePause() {
-        acquireWakeLock()
         if (activeSessionId == 0L || timerEngine.status == SessionStatus.IDLE) {
             serviceScope.launch(Dispatchers.IO) {
                 val session = repository.getActiveSession()
@@ -149,6 +148,7 @@ class FocusTimerService : Service() {
                         targetDurationSeconds = session.targetDurationSeconds
                         monitoringEnabled = session.monitoringEnabled
                         timerEngine.recoverSession(session, pauses)
+                        lastUsageQueryTimestamp = System.currentTimeMillis()
                         if (timerEngine.status == SessionStatus.ACTIVE) {
                             timerEngine.pause()
                         }
@@ -156,6 +156,7 @@ class FocusTimerService : Service() {
                         _activeSessionSnapshot.value = snapshot
                         updateNotification()
                         startTimerLoop()
+                        releaseWakeLock()
                         repository.pauseSession(activeSessionId, snapshot)
                     }
                 }
@@ -165,6 +166,7 @@ class FocusTimerService : Service() {
             val snapshot = timerEngine.getSnapshot()
             _activeSessionSnapshot.value = snapshot
             updateNotification()
+            releaseWakeLock()
             serviceScope.launch(Dispatchers.IO) {
                 repository.pauseSession(activeSessionId, snapshot)
             }
@@ -184,6 +186,7 @@ class FocusTimerService : Service() {
                         targetDurationSeconds = session.targetDurationSeconds
                         monitoringEnabled = session.monitoringEnabled
                         timerEngine.recoverSession(session, pauses)
+                        lastUsageQueryTimestamp = System.currentTimeMillis()
                         if (timerEngine.status == SessionStatus.PAUSED) {
                             timerEngine.resume()
                         }
@@ -220,9 +223,14 @@ class FocusTimerService : Service() {
                     targetDurationSeconds = session.targetDurationSeconds
                     monitoringEnabled = session.monitoringEnabled
                     timerEngine.recoverSession(session, pauses)
+                    lastUsageQueryTimestamp = System.currentTimeMillis()
                     val snapshot = timerEngine.getSnapshot()
                     _activeSessionSnapshot.value = snapshot
-                    acquireWakeLock()
+                    if (timerEngine.status == SessionStatus.ACTIVE) {
+                        acquireWakeLock()
+                    } else {
+                        releaseWakeLock()
+                    }
                     val notification = buildNotification(snapshot)
                     startForegroundServiceCompat(notification)
                     startTimerLoop()
@@ -240,7 +248,7 @@ class FocusTimerService : Service() {
             startForeground(
                 NOTIFICATION_ID,
                 notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
             )
         } else {
             startForeground(NOTIFICATION_ID, notification)
@@ -249,7 +257,7 @@ class FocusTimerService : Service() {
 
     private fun startTimerLoop() {
         timerLoopJob?.cancel()
-        timerLoopJob = serviceScope.launch {
+        timerLoopJob = serviceScope.launch(Dispatchers.IO) {
             // Load classifications once
             classificationCache = repository.getAllClassificationsSync().associate {
                 it.packageName to it.classification
@@ -271,41 +279,42 @@ class FocusTimerService : Service() {
                 val doCheckpoint = (tickCounter % 10 == 0)
 
                 if (checkUsage || doCheckpoint) {
-                    serviceScope.launch(Dispatchers.IO) {
-                        try {
-                            var hadNewUsages = false
-                            if (checkUsage && monitoringEnabled && usageMonitor.hasUsagePermission()) {
-                                val now = System.currentTimeMillis()
-                                val intervals = usageMonitor.processUsageWindow(
-                                    sessionId = activeSessionId,
-                                    windowStart = lastUsageQueryTimestamp,
-                                    windowEnd = now,
-                                    sessionState = timerEngine.status,
-                                    knownClassifications = classificationCache
-                                )
-                                if (intervals.isNotEmpty()) {
-                                    hadNewUsages = true
-                                    lastDetectedAppName = intervals.lastOrNull()?.applicationName
-                                    repository.recordAppUsages(activeSessionId, intervals)
-                                    for (interval in intervals) {
-                                        val isDistraction = interval.classification == AppClassification.DISTRACTING_APP
-                                        val isProductive = interval.classification == AppClassification.PRODUCTIVE_APP
-                                        timerEngine.addDistraction(
-                                            durationSeconds = interval.durationSeconds,
-                                            isDistracting = isDistraction,
-                                            isProductive = isProductive
-                                        )
-                                    }
+                    try {
+                        var hadNewUsages = false
+                        if (checkUsage && monitoringEnabled && usageMonitor.hasUsagePermission()) {
+                            val now = System.currentTimeMillis()
+                            val intervals = usageMonitor.processUsageWindow(
+                                sessionId = activeSessionId,
+                                windowStart = lastUsageQueryTimestamp,
+                                windowEnd = now,
+                                sessionState = timerEngine.status,
+                                knownClassifications = classificationCache
+                            )
+                            if (intervals.isNotEmpty()) {
+                                hadNewUsages = true
+                                lastDetectedAppName = intervals.lastOrNull()?.applicationName
+                                repository.recordAppUsages(activeSessionId, intervals)
+                                for (interval in intervals) {
+                                    val isDistraction = interval.classification == AppClassification.DISTRACTING_APP
+                                    val isProductive = interval.classification == AppClassification.PRODUCTIVE_APP
+                                    timerEngine.addDistraction(
+                                        durationSeconds = interval.durationSeconds,
+                                        isDistracting = isDistraction,
+                                        isProductive = isProductive
+                                    )
                                 }
-                                lastUsageQueryTimestamp = now
                             }
-
-                            if (doCheckpoint || hadNewUsages) {
-                                repository.checkpointSession(activeSessionId, snapshot)
-                            }
-                        } catch (e: Exception) {
-                            // Defensive: Prevent crash from interrupting the timer loop
+                            lastUsageQueryTimestamp = now
                         }
+
+                        if (doCheckpoint || hadNewUsages) {
+                            // Take snapshot AFTER processing usage metrics
+                            val checkpointSnapshot = timerEngine.getSnapshot()
+                            _activeSessionSnapshot.value = checkpointSnapshot
+                            repository.checkpointSession(activeSessionId, checkpointSnapshot)
+                        }
+                    } catch (e: Exception) {
+                        // Defensive: Prevent crash from interrupting the timer loop
                     }
                 }
             }
@@ -455,6 +464,22 @@ class FocusTimerService : Service() {
         serviceJob.cancel()
         releaseWakeLock()
         super.onDestroy()
+    }
+
+    override fun onTimeout(startId: Int) {
+        // Android imposed a foreground service time limit; persist and shut down safely.
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val snapshot = timerEngine.getSnapshot()
+                if (activeSessionId > 0L) {
+                    repository.checkpointSession(activeSessionId, snapshot)
+                }
+            } catch (e: Exception) {
+                // ignore
+            } finally {
+                stopServiceGracefully()
+            }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import com.naman.focusos.data.db.FocusDatabase
 import com.naman.focusos.notification.TaskAlarmScheduler
+import com.naman.focusos.service.FocusTimerService
 import com.naman.focusos.widget.FocusAppWidgetProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +38,12 @@ class BootReceiver : BroadcastReceiver() {
 
                     // Refresh widget
                     FocusAppWidgetProvider.sendRefreshBroadcast(context)
+
+                    // Recover an active/paused focus session if one exists
+                    val activeSession = db.focusSessionDao().getActiveSession()
+                    if (activeSession != null) {
+                        FocusTimerService.recoverSession(context, activeSession.id)
+                    }
                 } finally {
                     pendingResult.finish()
                 }

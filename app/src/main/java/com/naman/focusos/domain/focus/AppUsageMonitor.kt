@@ -75,10 +75,30 @@ class AndroidAppUsageProvider(private val context: Context) : AppUsageProvider {
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
                 val eventTime = event.timeStamp
-                val pkg = event.packageName ?: continue
 
                 when (event.eventType) {
+                    UsageEvents.Event.SCREEN_NON_INTERACTIVE,
+                    UsageEvents.Event.KEYGUARD_SHOWN -> {
+                        // Process screen/keyguard events independently of package name
+                        if (activePkg != null && eventTime >= startTime) {
+                            val duration = (eventTime - activeStart) / 1000
+                            if (duration > 0) {
+                                intervals.add(
+                                    RawUsageInterval(
+                                        packageName = activePkg,
+                                        applicationName = getApplicationLabel(activePkg),
+                                        startTimestamp = activeStart.coerceAtLeast(startTime),
+                                        endTimestamp = eventTime.coerceAtMost(endTime),
+                                        durationSeconds = duration
+                                    )
+                                )
+                            }
+                        }
+                        activePkg = null
+                    }
+
                     UsageEvents.Event.ACTIVITY_RESUMED -> {
+                        val pkg = event.packageName ?: continue
                         if (eventTime < startTime) {
                             activePkg = pkg
                             activeStart = startTime
@@ -90,19 +110,21 @@ class AndroidAppUsageProvider(private val context: Context) : AppUsageProvider {
                                         RawUsageInterval(
                                             packageName = activePkg,
                                             applicationName = getApplicationLabel(activePkg),
-                                            startTimestamp = activeStart,
-                                            endTimestamp = eventTime,
+                                            startTimestamp = activeStart.coerceAtLeast(startTime),
+                                            endTimestamp = eventTime.coerceAtMost(endTime),
                                             durationSeconds = duration
                                         )
                                     )
                                 }
                             }
                             activePkg = pkg
-                            activeStart = eventTime
+                            activeStart = eventTime.coerceAtLeast(startTime)
                         }
                     }
+
                     UsageEvents.Event.ACTIVITY_PAUSED,
                     UsageEvents.Event.ACTIVITY_STOPPED -> {
+                        val pkg = event.packageName ?: continue
                         if (activePkg == pkg) {
                             if (eventTime >= startTime) {
                                 val duration = (eventTime - activeStart) / 1000
@@ -111,8 +133,8 @@ class AndroidAppUsageProvider(private val context: Context) : AppUsageProvider {
                                         RawUsageInterval(
                                             packageName = activePkg,
                                             applicationName = getApplicationLabel(activePkg),
-                                            startTimestamp = activeStart,
-                                            endTimestamp = eventTime,
+                                            startTimestamp = activeStart.coerceAtLeast(startTime),
+                                            endTimestamp = eventTime.coerceAtMost(endTime),
                                             durationSeconds = duration
                                         )
                                     )
@@ -120,24 +142,6 @@ class AndroidAppUsageProvider(private val context: Context) : AppUsageProvider {
                             }
                             activePkg = null
                         }
-                    }
-                    UsageEvents.Event.SCREEN_NON_INTERACTIVE,
-                    UsageEvents.Event.KEYGUARD_SHOWN -> {
-                        if (activePkg != null && eventTime >= startTime) {
-                            val duration = (eventTime - activeStart) / 1000
-                            if (duration > 0) {
-                                intervals.add(
-                                    RawUsageInterval(
-                                        packageName = activePkg,
-                                        applicationName = getApplicationLabel(activePkg),
-                                        startTimestamp = activeStart,
-                                        endTimestamp = eventTime,
-                                        durationSeconds = duration
-                                    )
-                                )
-                            }
-                        }
-                        activePkg = null
                     }
                 }
             }
@@ -150,8 +154,8 @@ class AndroidAppUsageProvider(private val context: Context) : AppUsageProvider {
                         RawUsageInterval(
                             packageName = activePkg,
                             applicationName = getApplicationLabel(activePkg),
-                            startTimestamp = activeStart,
-                            endTimestamp = endTime,
+                            startTimestamp = activeStart.coerceAtLeast(startTime),
+                            endTimestamp = endTime.coerceAtMost(endTime),
                             durationSeconds = duration
                         )
                     )
@@ -204,6 +208,11 @@ class AppUsageMonitor(
             // Focus OS foreground is not a distraction
             if (interval.packageName == ourPackageName) continue
 
+            // Clip intervals to requested window (defensive)
+            val clippedStart = interval.startTimestamp.coerceIn(windowStart, windowEnd)
+            val clippedEnd = interval.endTimestamp.coerceIn(windowStart, windowEnd)
+            if (clippedEnd <= clippedStart) continue
+
             val configured = knownClassifications[interval.packageName]
             val classification = when {
                 sessionState == SessionStatus.PAUSED -> AppClassification.PAUSED_SESSION_USAGE
@@ -218,9 +227,9 @@ class AppUsageMonitor(
                     packageName = interval.packageName,
                     applicationName = interval.applicationName,
                     classification = classification,
-                    startTimestamp = interval.startTimestamp,
-                    endTimestamp = interval.endTimestamp,
-                    durationSeconds = interval.durationSeconds,
+                    startTimestamp = clippedStart,
+                    endTimestamp = clippedEnd,
+                    durationSeconds = (clippedEnd - clippedStart) / 1000,
                     sessionState = if (sessionState == SessionStatus.PAUSED) "PAUSED" else "ACTIVE",
                     monitoringConfidence = "HIGH"
                 )

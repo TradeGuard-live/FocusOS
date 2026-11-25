@@ -209,8 +209,17 @@ class FocusSessionRepository(private val context: Context) {
 
     suspend fun recordAppUsages(sessionId: Long, usages: List<FocusAppUsageEntity>) = withContext(Dispatchers.IO) {
         if (usages.isEmpty()) return@withContext
-        focusDao.insertAppUsages(usages)
-        for (u in usages) {
+        val existing = focusDao.getAppUsagesForSessionSync(sessionId)
+        val newUsages = usages.filter { candidate ->
+            existing.none { e ->
+                e.packageName == candidate.packageName &&
+                    e.startTimestamp == candidate.startTimestamp &&
+                    e.endTimestamp == candidate.endTimestamp
+            }
+        }
+        if (newUsages.isEmpty()) return@withContext
+        focusDao.insertAppUsages(newUsages)
+        for (u in newUsages) {
             focusDao.insertEvent(
                 FocusSessionEventEntity(
                     sessionId = sessionId,

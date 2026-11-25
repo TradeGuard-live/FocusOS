@@ -2,6 +2,8 @@
 <full-backup-content>
     <!-- Include database and preferences in user cloud backup -->
     <include domain="database" path="focus_os_database.db" />
+    <include domain="database" path="focus_os_database.db-wal" />
+    <include domain="database" path="focus_os_database.db-shm" />
     <include domain="sharedpref" path="." />
 </full-backup-content>
 
