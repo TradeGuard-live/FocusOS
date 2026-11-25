@@ -1,3 +1,4 @@
+// Cleaned CalendarScreen.kt after fixing syntax errors
 package com.naman.focusos.ui.screens.calendar
 
 import androidx.compose.foundation.background
@@ -134,7 +135,7 @@ fun CalendarScreen(
                 }
             }
 
-            // Tasks for Selected Date
+            // Header for selected date
             item {
                 val formatter = DateTimeFormatter.ofPattern("EEEE, MMMM d")
                 Row(
@@ -214,6 +215,7 @@ fun CalendarScreen(
         }
     }
 
+    // Add/Edit sheet
     if (showAddTaskSheet || taskToEdit != null) {
         QuickAddTaskSheet(
             categories = uiState.categories,
@@ -289,7 +291,6 @@ fun CalendarScreen(
                     }
                 }
             },
-            confirmButton = {},
             dismissButton = {
                 OutlinedButton(
                     onClick = {
@@ -342,7 +343,8 @@ fun CalendarScreen(
                         containerColor = CrimsonCoral,
                         contentColor = Color.White
                     ),
-                    shape = RoundedCornerShape(10.dp)
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Delete Permanently", fontWeight = FontWeight.Bold)
                 }
@@ -393,153 +395,6 @@ fun CalendarViewSelector(
                         color = if (isSelected) (if (FocusTheme.colors.isDark) Color.Black else Color.White) else FocusTheme.colors.textSecondary,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                     )
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun CalendarMonthHeader(
-    currentMonth: YearMonth,
-    onPrev: () -> Unit,
-    onNext: () -> Unit
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column {
-            Text(
-                text = "${currentMonth.month.getDisplayName(TextStyle.FULL, Locale.getDefault())} ${currentMonth.year}",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = FocusTheme.colors.textPrimary
-                )
-            )
-        }
-
-        Row {
-            IconButton(onClick = onPrev, modifier = Modifier.size(32.dp)) {
-                Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Prev", tint = FocusTheme.colors.textSecondary)
-            }
-            IconButton(onClick = onNext, modifier = Modifier.size(32.dp)) {
-                Icon(imageVector = Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Next", tint = FocusTheme.colors.textSecondary)
-            }
-        }
-    }
-}
-
-@Composable
-fun WeekdayHeader() {
-    val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-    Row(modifier = Modifier.fillMaxWidth()) {
-        days.forEach { day ->
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier.weight(1f).padding(vertical = 4.dp)
-            ) {
-                Text(
-                    text = day,
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        color = FocusTheme.colors.textMuted,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 11.sp
-                    )
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun CalendarMonthGrid(
-    currentMonth: YearMonth,
-    selectedDate: LocalDate,
-    tasksByDate: Map<String, List<TaskEntity>>,
-    onDateClick: (LocalDate) -> Unit
-) {
-    val firstDayOfMonth = currentMonth.atDay(1)
-    val dayOfWeekOffset = (firstDayOfMonth.dayOfWeek.value - 1) // 0 for Mon .. 6 for Sun
-    val totalDaysInMonth = currentMonth.lengthOfMonth()
-
-    val totalCells = ((dayOfWeekOffset + totalDaysInMonth + 6) / 7) * 7
-    val rows = totalCells / 7
-
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        for (r in 0 until rows) {
-            Row(modifier = Modifier.fillMaxWidth()) {
-                for (c in 0 until 7) {
-                    val cellIndex = r * 7 + c
-                    val dayNum = cellIndex - dayOfWeekOffset + 1
-
-                    if (dayNum in 1..totalDaysInMonth) {
-                        val date = currentMonth.atDay(dayNum)
-                        val dateStr = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
-                        val tasks = tasksByDate[dateStr] ?: emptyList()
-                        val isSelected = date == selectedDate
-                        val isToday = date == LocalDate.now()
-
-                        CalendarCell(
-                            dayNumber = dayNum,
-                            tasksCount = tasks.size,
-                            isSelected = isSelected,
-                            isToday = isToday,
-                            onClick = { onDateClick(date) },
-                            modifier = Modifier.weight(1f)
-                        )
-                    } else {
-                        // Empty spacer cell
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun CalendarCell(
-    dayNumber: Int,
-    tasksCount: Int,
-    isSelected: Boolean,
-    isToday: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val isDark = FocusTheme.colors.isDark
-    val todayBg = if (isDark) Color(0xFF1E293B) else Color(0xFFE2E8F0)
-
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = modifier
-            .height(44.dp)
-            .padding(2.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (isSelected) FocusTheme.colors.primaryAccent else if (isToday) todayBg else Color.Transparent)
-            .then(
-                if (isToday && !isSelected) Modifier.border(1.dp, FocusTheme.colors.primaryAccent, RoundedCornerShape(10.dp))
-                else Modifier
-            )
-            .clickable { onClick() }
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = "$dayNumber",
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = if (isSelected || isToday) FontWeight.Bold else FontWeight.Medium,
-                    color = if (isSelected) (if (isDark) Color.Black else Color.White) else FocusTheme.colors.textPrimary,
-                    fontSize = 13.sp
-                )
-            )
-
-            if (tasksCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .size(4.dp)
-                        .clip(CircleShape)
-                        .background(if (isSelected) (if (isDark) Color.Black else Color.White) else FocusTheme.colors.success)
                 )
             }
         }

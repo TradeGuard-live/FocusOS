@@ -36,6 +36,7 @@ import com.naman.focusos.domain.focus.TaskEfficiencySummary
 import com.naman.focusos.domain.focus.WeeklyFocusStats
 import com.naman.focusos.service.FocusTimerService
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -158,10 +159,51 @@ class FocusViewModel(application: Application) : AndroidViewModel(application) {
 
         // Observe active session from DB
         viewModelScope.launch {
+            var hasTriggeredRecovery = false
             repository.getActiveSessionFlow().collect { active ->
-                _uiState.value = _uiState.value.copy(activeSession = active)
+                val currentSnapshot = _uiState.value.liveSnapshot
+                val shouldRecover = active != null && !hasTriggeredRecovery && currentSnapshot.status == SessionStatus.IDLE &&
+                    (active.sessionStatus == SessionStatus.ACTIVE || active.sessionStatus == SessionStatus.PAUSED)
+
+                if (shouldRecover) {
+                    hasTriggeredRecovery = true
+                    FocusTimerService.recoverSession(getApplication(), active.id)
+                }
+
+                val resolvedSnapshot = if (active != null && currentSnapshot.status == SessionStatus.IDLE &&
+                    (active.sessionStatus == SessionStatus.ACTIVE || active.sessionStatus == SessionStatus.PAUSED)
+                ) {
+                    LiveTimerSnapshot(
+                        sessionId = active.id,
+                        status = active.sessionStatus,
+                        focusedSeconds = active.focusedDurationSeconds,
+                        pausedSeconds = active.pausedDurationSeconds,
+                        totalElapsedSeconds = active.totalElapsedSeconds,
+                        distractedSeconds = active.distractedDurationSeconds,
+                        productiveSeconds = active.productiveAppDurationSeconds,
+                        targetDurationSeconds = active.targetDurationSeconds,
+                        remainingSeconds = if (active.targetDurationSeconds > 0) {
+                            (active.targetDurationSeconds - active.focusedDurationSeconds).coerceAtLeast(0)
+                        } else 0L,
+                        progress = if (active.targetDurationSeconds > 0) {
+                            (active.focusedDurationSeconds.toFloat() / active.targetDurationSeconds.toFloat()).coerceIn(0f, 1f)
+                        } else 0f,
+                        distractionCount = active.distractionCount,
+                        appSwitchCount = active.appSwitchCount
+                    )
+                } else currentSnapshot
+
+                _uiState.update {
+                    it.copy(
+                        activeSession = active,
+                        liveSnapshot = resolvedSnapshot
+                    )
+                }
                 if (active != null) {
                     observeActiveSessionDetails(active.id)
+                } else {
+                    currentObservedSessionId = null
+                    activeSessionDetailsJob?.cancel()
                 }
             }
         }
@@ -262,23 +304,38 @@ class FocusViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(hasUsagePermission = granted)
     }
 
+    private var activeSessionDetailsJob: Job? = null
+    private var currentObservedSessionId: Long? = null
+
     private fun observeActiveSessionDetails(sessionId: Long) {
-        viewModelScope.launch {
-            repository.getPausesForSession(sessionId).collect { pauses ->
-                _uiState.value = _uiState.value.copy(activeSessionPauses = pauses)
-            }
+        if (currentObservedSessionId == sessionId && activeSessionDetailsJob?.isActive == true) {
+            return
         }
-        viewModelScope.launch {
-            repository.getAppUsagesForSession(sessionId).collect { usages ->
-                _uiState.value = _uiState.value.copy(
-                    activeSessionUsages = usages,
-                    topApps = analyticsEngine.computeAppStats(usages)
-                )
+        currentObservedSessionId = sessionId
+        activeSessionDetailsJob?.cancel()
+        activeSessionDetailsJob = viewModelScope.launch {
+            launch {
+                repository.getPausesForSession(sessionId).collect { pauses ->
+                    _uiState.update { it.copy(activeSessionPauses = pauses) }
+                }
             }
-        }
-        viewModelScope.launch {
-            repository.getEventsForSession(sessionId).collect { events ->
-                _uiState.value = _uiState.value.copy(activeSessionEvents = events)
+            launch {
+                repository.getAppUsagesForSession(sessionId).collect { usages ->
+                    val top = withContext(Dispatchers.Default) {
+                        analyticsEngine.computeAppStats(usages)
+                    }
+                    _uiState.update {
+                        it.copy(
+                            activeSessionUsages = usages,
+                            topApps = top
+                        )
+                    }
+                }
+            }
+            launch {
+                repository.getEventsForSession(sessionId).collect { events ->
+                    _uiState.update { it.copy(activeSessionEvents = events) }
+                }
             }
         }
     }
@@ -317,6 +374,10 @@ class FocusViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun resumeSession() {
+        val active = _uiState.value.activeSession
+        if (active != null && _uiState.value.liveSnapshot.status == SessionStatus.IDLE) {
+            FocusTimerService.recoverSession(getApplication(), active.id)
+        }
         FocusTimerService.resumeSession(getApplication())
     }
 

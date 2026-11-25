@@ -1776,6 +1776,60 @@ class FocusOSTestSuite {
     }
 
     @Test
+    fun testFocusTimerEngineRecoverPausedSessionWithOpenPauseAndResume() {
+        val clock = TestClockProvider()
+        val engine = FocusTimerEngine(clock)
+
+        // Session was active for 500s, then paused at wallTime - 200s (open pause)
+        val pauseStartTime = clock.wallTime - 200_000L
+        val savedSession = FocusSessionEntity(
+            id = 99L,
+            title = "Paused Session Recovery",
+            targetDurationSeconds = 1500L,
+            startTimestamp = clock.wallTime - 700_000L,
+            focusedDurationSeconds = 500L,
+            pausedDurationSeconds = 50L,
+            sessionStatus = SessionStatus.PAUSED
+        )
+
+        val pauses = listOf(
+            FocusPauseEntity(
+                id = 1L,
+                sessionId = 99L,
+                pauseTimestamp = pauseStartTime,
+                resumeTimestamp = null // Open pause!
+            )
+        )
+
+        engine.recoverSession(savedSession, pauses, currentWall = clock.wallTime, currentElapsed = clock.elapsed)
+        val recoveredSnapshot = engine.getSnapshot()
+
+        assertEquals(SessionStatus.PAUSED, recoveredSnapshot.status)
+        assertEquals(500L, recoveredSnapshot.focusedSeconds)
+        // Accumulated 50s + 200s elapsed during open pause = 250s
+        assertEquals(250L, recoveredSnapshot.pausedSeconds)
+
+        // Advance 50 seconds while still paused
+        clock.advanceSeconds(50L)
+        val afterPauseSnapshot = engine.getSnapshot()
+        assertEquals(300L, afterPauseSnapshot.pausedSeconds)
+        assertEquals(500L, afterPauseSnapshot.focusedSeconds)
+
+        // Resume timer: must resume from 500s focused time, NOT from 0!
+        engine.resume(resumeWallTime = clock.wallTime, resumeElapsed = clock.elapsed)
+        val resumedSnapshot = engine.getSnapshot()
+        assertEquals(SessionStatus.ACTIVE, resumedSnapshot.status)
+        assertEquals(500L, resumedSnapshot.focusedSeconds)
+        assertEquals(300L, resumedSnapshot.pausedSeconds)
+
+        // Advance 60 seconds after resuming
+        clock.advanceSeconds(60L)
+        val advancedSnapshot = engine.getSnapshot()
+        assertEquals(560L, advancedSnapshot.focusedSeconds)
+        assertEquals(300L, advancedSnapshot.pausedSeconds)
+    }
+
+    @Test
     fun testAppUsageMonitorClassification() {
         val intervals = listOf(
             RawUsageInterval("com.naman.focusos", "Focus OS", 1000L, 2000L, 1L),

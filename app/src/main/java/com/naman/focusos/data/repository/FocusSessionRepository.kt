@@ -107,12 +107,19 @@ class FocusSessionRepository(private val context: Context) {
         id
     }
 
-    suspend fun pauseSession(sessionId: Long, reason: String? = null) = withContext(Dispatchers.IO) {
+    suspend fun pauseSession(sessionId: Long, snapshot: LiveTimerSnapshot? = null, reason: String? = null) = withContext(Dispatchers.IO) {
         val session = focusDao.getSessionById(sessionId) ?: return@withContext
         val now = System.currentTimeMillis()
         focusDao.updateSession(
             session.copy(
                 sessionStatus = SessionStatus.PAUSED,
+                focusedDurationSeconds = snapshot?.focusedSeconds ?: session.focusedDurationSeconds,
+                pausedDurationSeconds = snapshot?.pausedSeconds ?: session.pausedDurationSeconds,
+                totalElapsedSeconds = snapshot?.totalElapsedSeconds ?: session.totalElapsedSeconds,
+                distractedDurationSeconds = snapshot?.distractedSeconds ?: session.distractedDurationSeconds,
+                productiveAppDurationSeconds = snapshot?.productiveSeconds ?: session.productiveAppDurationSeconds,
+                distractionCount = snapshot?.distractionCount ?: session.distractionCount,
+                appSwitchCount = snapshot?.appSwitchCount ?: session.appSwitchCount,
                 updatedAt = now
             )
         )
@@ -133,7 +140,7 @@ class FocusSessionRepository(private val context: Context) {
         )
     }
 
-    suspend fun resumeSession(sessionId: Long) = withContext(Dispatchers.IO) {
+    suspend fun resumeSession(sessionId: Long, snapshot: LiveTimerSnapshot? = null) = withContext(Dispatchers.IO) {
         val session = focusDao.getSessionById(sessionId) ?: return@withContext
         val now = System.currentTimeMillis()
         val activePause = focusDao.getActivePauseForSession(sessionId)
@@ -145,11 +152,17 @@ class FocusSessionRepository(private val context: Context) {
                     pauseDurationSeconds = pauseDuration
                 )
             )
-            val updatedPausedDuration = session.pausedDurationSeconds + pauseDuration
+            val updatedPausedDuration = snapshot?.pausedSeconds ?: (session.pausedDurationSeconds + pauseDuration)
             focusDao.updateSession(
                 session.copy(
                     sessionStatus = SessionStatus.ACTIVE,
+                    focusedDurationSeconds = snapshot?.focusedSeconds ?: session.focusedDurationSeconds,
                     pausedDurationSeconds = updatedPausedDuration,
+                    totalElapsedSeconds = snapshot?.totalElapsedSeconds ?: session.totalElapsedSeconds,
+                    distractedDurationSeconds = snapshot?.distractedSeconds ?: session.distractedDurationSeconds,
+                    productiveAppDurationSeconds = snapshot?.productiveSeconds ?: session.productiveAppDurationSeconds,
+                    distractionCount = snapshot?.distractionCount ?: session.distractionCount,
+                    appSwitchCount = snapshot?.appSwitchCount ?: session.appSwitchCount,
                     updatedAt = now
                 )
             )
@@ -157,6 +170,13 @@ class FocusSessionRepository(private val context: Context) {
             focusDao.updateSession(
                 session.copy(
                     sessionStatus = SessionStatus.ACTIVE,
+                    focusedDurationSeconds = snapshot?.focusedSeconds ?: session.focusedDurationSeconds,
+                    pausedDurationSeconds = snapshot?.pausedSeconds ?: session.pausedDurationSeconds,
+                    totalElapsedSeconds = snapshot?.totalElapsedSeconds ?: session.totalElapsedSeconds,
+                    distractedDurationSeconds = snapshot?.distractedSeconds ?: session.distractedDurationSeconds,
+                    productiveAppDurationSeconds = snapshot?.productiveSeconds ?: session.productiveAppDurationSeconds,
+                    distractionCount = snapshot?.distractionCount ?: session.distractionCount,
+                    appSwitchCount = snapshot?.appSwitchCount ?: session.appSwitchCount,
                     updatedAt = now
                 )
             )

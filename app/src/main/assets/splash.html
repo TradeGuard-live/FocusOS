@@ -309,21 +309,6 @@
         ctx.fillStyle = '#0b1018';
         ctx.fillRect(0, 0, w, h);
 
-        // Subtle Grid
-        const gridStep = Math.max(28, Math.round(Math.min(w, h) / 12));
-        ctx.strokeStyle = 'rgba(148, 163, 184, 0.045)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        for (let gx = (w / 2) % gridStep; gx < w; gx += gridStep) {
-          ctx.moveTo(gx, 0);
-          ctx.lineTo(gx, h);
-        }
-        for (let gy = (h / 2) % gridStep; gy < h; gy += gridStep) {
-          ctx.moveTo(0, gy);
-          ctx.lineTo(w, gy);
-        }
-        ctx.stroke();
-
         // Ambient Radial Glow (Cyan & Emerald)
         const cx = w * 0.5;
         const cy = h * 0.5;

@@ -335,7 +335,7 @@ fun TodayScreen(
                     }
                 }
             },
-            confirmButton = {},
+
             dismissButton = {
                 OutlinedButton(
                     onClick = {

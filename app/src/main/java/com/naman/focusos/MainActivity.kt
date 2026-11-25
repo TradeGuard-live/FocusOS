@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -25,8 +27,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.naman.focusos.data.model.SessionStatus
 import com.naman.focusos.data.preferences.UserPreferencesManager
 import com.naman.focusos.service.FocusTimerService
 import com.naman.focusos.ui.components.FocusScreen
@@ -132,6 +136,27 @@ fun FocusOSApp(initialNavigateToFocus: Boolean = false) {
     val routinesViewModel: RoutinesViewModel = viewModel()
     val analyticsViewModel: AnalyticsViewModel = viewModel()
     val settingsViewModel: SettingsViewModel = viewModel()
+
+    // Keep screen on while Focus Timer is on and Focus OS is opened until timer completes
+    val focusUiState by focusViewModel.uiState.collectAsState()
+    val isFocusTimerOn = focusUiState.liveSnapshot.status == SessionStatus.ACTIVE ||
+            focusUiState.liveSnapshot.status == SessionStatus.PAUSED ||
+            (focusUiState.activeSession != null &&
+             focusUiState.activeSession?.sessionStatus != SessionStatus.COMPLETED &&
+             focusUiState.activeSession?.sessionStatus != SessionStatus.STOPPED)
+
+    val activity = LocalContext.current as? ComponentActivity
+    DisposableEffect(isFocusTimerOn) {
+        val window = activity?.window
+        if (isFocusTimerOn) {
+            window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
 
     Scaffold(
         containerColor = FocusTheme.colors.background,

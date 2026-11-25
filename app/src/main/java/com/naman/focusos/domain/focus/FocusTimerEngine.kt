@@ -267,9 +267,14 @@ class FocusTimerEngine(
         val openPause = pauses.find { it.resumeTimestamp == null }
         if (openPause != null) {
             status = SessionStatus.PAUSED
-            // Close or continue pause
+            // Accurately account for time spent in pause prior to recovery
+            val elapsedPauseSecs = ((currentWall - openPause.pauseTimestamp) / 1000).coerceAtLeast(0)
+            currentPauseStartElapsed = currentElapsed - (elapsedPauseSecs * 1000)
+        } else if (session.sessionStatus == SessionStatus.PAUSED) {
+            status = SessionStatus.PAUSED
             currentPauseStartElapsed = currentElapsed
         } else {
+            status = session.sessionStatus
             activeSegmentStartElapsed = currentElapsed
         }
     }

@@ -212,7 +212,7 @@ fun ActiveFocusScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = if (isPaused) snapshot.formattedPausedTime else snapshot.formattedFocusedTime,
+                    text = snapshot.formattedFocusedTime,
                     style = MaterialTheme.typography.displayMedium.copy(
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 38.sp,
@@ -224,20 +224,20 @@ fun ActiveFocusScreen(
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = if (isPaused) "Paused Time" else {
+                    text = if (isPaused) "Session Paused • Paused for ${snapshot.formattedPausedTime}" else {
                         if (isTargetSet) "Target: $targetDurationFormatted (${(snapshot.progress * 100).toInt()}%)"
                         else "Elapsed: ${snapshot.formattedTotalElapsed}"
                     },
                     style = MaterialTheme.typography.bodySmall.copy(
-                        color = FocusTheme.colors.textSecondary,
+                        color = if (isPaused) FocusTheme.colors.warning else FocusTheme.colors.textSecondary,
                         fontWeight = FontWeight.Medium
                     )
                 )
 
-                if (isTargetSet && !isPaused) {
+                if (isTargetSet) {
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "Remaining: ${snapshot.formattedRemainingTime}",
+                        text = if (isPaused) "Remaining: ${snapshot.formattedRemainingTime} (Paused)" else "Remaining: ${snapshot.formattedRemainingTime}",
                         style = MaterialTheme.typography.labelSmall.copy(
                             color = FocusTheme.colors.primaryAccent,
                             fontWeight = FontWeight.SemiBold

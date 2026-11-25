@@ -63,11 +63,14 @@ class AndroidAppUsageProvider(private val context: Context) : AppUsageProvider {
 
         val intervals = mutableListOf<RawUsageInterval>()
         try {
-            val events = usageStatsManager.queryEvents(startTime, endTime)
+            // Look back up to 10 minutes prior to startTime to capture the active foreground app
+            // even if its launch event happened before the current query window.
+            val lookbackStart = (startTime - 10 * 60 * 1000L).coerceAtLeast(0L)
+            val events = usageStatsManager.queryEvents(lookbackStart, endTime)
             val event = UsageEvents.Event()
 
-            var currentPkg: String? = null
-            var currentStart: Long = startTime
+            var activePkg: String? = null
+            var activeStart: Long = startTime
 
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
@@ -76,53 +79,78 @@ class AndroidAppUsageProvider(private val context: Context) : AppUsageProvider {
 
                 when (event.eventType) {
                     UsageEvents.Event.ACTIVITY_RESUMED -> {
-                        if (currentPkg != null && currentPkg != pkg) {
-                            val duration = (eventTime - currentStart) / 1000
-                            if (duration > 0) {
-                                intervals.add(
-                                    RawUsageInterval(
-                                        packageName = currentPkg,
-                                        applicationName = getApplicationLabel(currentPkg),
-                                        startTimestamp = currentStart,
-                                        endTimestamp = eventTime,
-                                        durationSeconds = duration
+                        if (eventTime < startTime) {
+                            activePkg = pkg
+                            activeStart = startTime
+                        } else {
+                            if (activePkg != null && activePkg != pkg) {
+                                val duration = (eventTime - activeStart) / 1000
+                                if (duration > 0) {
+                                    intervals.add(
+                                        RawUsageInterval(
+                                            packageName = activePkg,
+                                            applicationName = getApplicationLabel(activePkg),
+                                            startTimestamp = activeStart,
+                                            endTimestamp = eventTime,
+                                            durationSeconds = duration
+                                        )
                                     )
-                                )
+                                }
                             }
+                            activePkg = pkg
+                            activeStart = eventTime
                         }
-                        currentPkg = pkg
-                        currentStart = eventTime
                     }
                     UsageEvents.Event.ACTIVITY_PAUSED,
                     UsageEvents.Event.ACTIVITY_STOPPED -> {
-                        if (currentPkg == pkg) {
-                            val duration = (eventTime - currentStart) / 1000
+                        if (activePkg == pkg) {
+                            if (eventTime >= startTime) {
+                                val duration = (eventTime - activeStart) / 1000
+                                if (duration > 0) {
+                                    intervals.add(
+                                        RawUsageInterval(
+                                            packageName = activePkg,
+                                            applicationName = getApplicationLabel(activePkg),
+                                            startTimestamp = activeStart,
+                                            endTimestamp = eventTime,
+                                            durationSeconds = duration
+                                        )
+                                    )
+                                }
+                            }
+                            activePkg = null
+                        }
+                    }
+                    UsageEvents.Event.SCREEN_NON_INTERACTIVE,
+                    UsageEvents.Event.KEYGUARD_SHOWN -> {
+                        if (activePkg != null && eventTime >= startTime) {
+                            val duration = (eventTime - activeStart) / 1000
                             if (duration > 0) {
                                 intervals.add(
                                     RawUsageInterval(
-                                        packageName = currentPkg,
-                                        applicationName = getApplicationLabel(currentPkg),
-                                        startTimestamp = currentStart,
+                                        packageName = activePkg,
+                                        applicationName = getApplicationLabel(activePkg),
+                                        startTimestamp = activeStart,
                                         endTimestamp = eventTime,
                                         durationSeconds = duration
                                     )
                                 )
                             }
-                            currentPkg = null
                         }
+                        activePkg = null
                     }
                 }
             }
 
             // Close trailing interval up to endTime if still foregrounded
-            if (currentPkg != null) {
-                val duration = (endTime - currentStart) / 1000
+            if (activePkg != null) {
+                val duration = (endTime - activeStart) / 1000
                 if (duration > 0) {
                     intervals.add(
                         RawUsageInterval(
-                            packageName = currentPkg,
-                            applicationName = getApplicationLabel(currentPkg),
-                            startTimestamp = currentStart,
+                            packageName = activePkg,
+                            applicationName = getApplicationLabel(activePkg),
+                            startTimestamp = activeStart,
                             endTimestamp = endTime,
                             durationSeconds = duration
                         )
